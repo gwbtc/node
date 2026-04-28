@@ -1,7 +1,8 @@
 /-  *bitcoin-common
-/+  btp=bitcoin-core-http
+/+  b-val=bitcoin-validation,
+    b-http=bitcoin-core-http
 |%
-+$  http-core-source  node-config:btp
++$  http-core-source  node-config:b-http
 +$  http-core-info
   $:  rest=?
       txindex=?
