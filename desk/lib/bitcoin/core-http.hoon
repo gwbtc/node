@@ -1,4 +1,5 @@
 /-  *bitcoin-common
+/+  b-ser=bitcoin-serialization
 |%
 ::
 +$  node-config
@@ -8,7 +9,7 @@
 ::
 ++  make-request-card
   |=  [wir=wire req=request:http]
-  ^-  card
+  ^-  card:agent:gall
   :*  %pass  wir  %arvo  %i  %request  req  *outbound-config:iris
   ==
 ::
@@ -16,6 +17,7 @@
   |%
   +$  request
     $%  [%block-hash =block-height]
+        [%block-headers start=block-hash count=@ud]
         [%block =block-hash]
     ==
   ::
@@ -29,8 +31,26 @@
     :+  url.fig  '/rest'
     ^-  (list cord)
     ?-  -.req
-      %block       ['/block/' (en:base16:mimes:html 32 block-hash.req) '.bin' ~]
-      %block-hash  ['/blockhashbyheight/' (crip ((d-co:co 1) block-height.req)) '.bin' ~]
+    ::
+        %block
+      :~  '/block/'
+          (en:base16:mimes:html 32 block-hash.req)
+          '.bin'
+      ==
+    ::
+        %block-hash
+      :~  '/blockhashbyheight/'
+          (crip ((d-co:co 1) block-height.req))
+          '.bin'
+      ==
+    ::
+        %block-headers
+      :~  '/headers/'
+          (en:base16:mimes:html 32 start.req)
+          '.bin?count='
+          (crip ((d-co:co 1) count.req))
+      ==
+    ::
     ==
   ::
   --
@@ -41,15 +61,21 @@
     $%  [%get-block-count ~]
         [%get-block-hash =block-height]
         [%get-block-header =block-hash]
-        [%get-block-atom =block-hash]
+        [%get-block-hash-batch start=block-height count=@ud]
+        [%get-block-header-batch block-hashes=(list block-hash)]
+        [%get-block =block-hash]
         [%get-transaction =block-hash =txid]
+        [%get-merkle-proof =block-hash =txid]
     ==
   +$  response
     $%  [%get-block-count =block-height]
         [%get-block-hash =block-hash]
         [%get-block-header =block-header]
-        [%get-block-atom =block]
+        [%get-block-hash-batch batch=(list block-hash)]
+        [%get-block-header-batch batch=(list (pair block-height block-header))]
+        [%get-block =block]
         [%get-transaction =transaction]
+        [%get-merkle-proof =merkle-block]
     ==
   ::
   ++  make-request
@@ -93,7 +119,24 @@
       :~  [%s (en:base16:mimes:html 32 block-hash.req)]
       ==  ==
     ::
-        %get-block-atom
+        %get-block-hash-batch
+      ?<  =(0 count.req)
+      :-  %a
+      %+  turn  (gulf start.req (add start.req (dec count.req)))
+      |=  het=@ud
+      %:  make-request-object  -.req  %getblockhash
+      :~  [%n (crip ((d-co:co 1) het))]
+      ==  ==
+    ::
+        %get-block-header-batch
+      :-  %a
+      %+  turn  block-hashes.req
+      |=  haz=block-hash
+      %:  make-request-object  -.req  %getblockheader
+      :~  [%s (en:base16:mimes:html 32 haz)]
+      ==  ==
+    ::
+        %get-block
       %:  make-request-object  -.req  %getblock
       :~  [%s (en:base16:mimes:html 32 block-hash.req)]
           [%n '0']  :: least verbosity
@@ -103,6 +146,12 @@
       %:  make-request-object  -.req  %getrawtransaction
       :~  [%s (en:base16:mimes:html 32 txid.req)]
           [%b &]  :: full verbosity
+          [%s (en:base16:mimes:html 32 block-hash.req)]
+      ==  ==
+    ::
+        %get-merkle-proof
+      %:  make-request-object  -.req  %gettxoutproof
+      :~  [%a [[%s (en:base16:mimes:html 32 txid.req)] ~]]
           [%s (en:base16:mimes:html 32 block-hash.req)]
       ==  ==
     ::
@@ -131,12 +180,39 @@
         %get-block-count   [tag ud:res]
         %get-block-hash    [tag ux:res]
         %get-block-header  [tag (json-to-block-header jo:res)]
-        %get-block-atom    [tag ux:res]
+        %get-block         [tag (json-to-block jo:res)]
         %get-transaction   [tag (json-to-transaction jo:res)]
+        %get-merkle-proof  [tag (json-to-merkle-block jo:res)]
       ==
     ::
         [%a *]
-      !!
+      =/  tag  ?>(?=(^ p.jon) t:(~(got dj i.p.jon) 'id'))
+      ?+  tag  !!
+      ::
+          %get-block-hash-batch
+        :-  tag
+        %+  murn  p.jon
+        |=  jun=json
+        ^-  (unit block-hash)
+        =/  dej  ~(. dj jun)
+        ?:  (has:dej 'error')  ~
+        :-  ~
+            ux:(got:dej 'result')
+      ::
+          %get-block-header-batch
+        :-  tag
+        %+  murn  p.jon
+        |=  jun=json
+        ^-  (unit (pair block-height block-header))
+        =/  dej  ~(. dj jun)
+        ?:  (has:dej 'error')  ~
+        =.  dej  (got:dej 'result')
+        :-  ~
+        :-  ud:(got:dej 'height')
+        %-  json-to-block-header
+            jo:dej
+      ::
+      ==
     ::
     ==
   ::
@@ -146,6 +222,7 @@
         %getblockheader
         %getblock
         %getrawtransaction
+        %gettxoutproof
     ==
   ::
   ++  make-request-object
@@ -162,6 +239,22 @@
         ['method' [%s method]]
         ['params' [%a params]]
     ==
+  ::
+  ++  json-to-merkle-block
+    |=  jon=json
+    ^-  merkle-block
+    =/  dat  (rev 3 ~(ux-b dj jon))
+    =/  de-core  (de-abed:de:b-ser dat)
+    =>  de-merkle-block:de-core
+        -
+  ::
+  ++  json-to-block
+    |=  jon=json
+    ^-  block
+    =/  dat  (rev 3 ~(ux-b dj jon))
+    =/  de-core  (de-abed:de:b-ser dat)
+    =>  de-block:de-core
+        -
   ::
   ++  json-to-block-header
     |=  jon=json
@@ -251,11 +344,10 @@
   ::
   ++  ux
     ^-  @ux
-    ?>  ?=([%s *] jon)
-    =<  q
-    %-  need
-    %-  de:base16:mimes:html
-        p.jon
+    ?+  jon  !!
+      [%s *]  q:(need (de:base16:mimes:html p.jon))
+      [%n *]  (rash p.jon dem)
+    ==
   ::
   ++  ux-b
     ^-  hexb

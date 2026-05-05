@@ -59,6 +59,7 @@
     =/  res  (validate-block-header i.mor)
     ?^  res  res
     %=  $
+      mor  t.mor
       hes  (put:on-block-headers hes i.mor)
     ==
   ::

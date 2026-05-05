@@ -41,8 +41,16 @@
       nonce=@ux
   ==
 ::
-+$  block   @ux
-+$  blocks  (map block-hash block)
++$  block
+  $:  block-header
+      txs=(list transaction)
+  ==
+::
++$  merkle-block
+  $:  =block-header
+      hashes=(list @ux)
+      flags=(list flag)
+  ==
 ::
 --
 
