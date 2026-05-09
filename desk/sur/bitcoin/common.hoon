@@ -13,9 +13,10 @@
 ::
 +$  transaction
   $:  version=@ux
-      locktime=@ud
+      flag=@ud
       inputs=(list transaction-input)
       outputs=(list transaction-output)
+      locktime=@ud
   ==
 +$  transaction-input
   $:  =txid
@@ -47,7 +48,11 @@
   ==
 ::
 +$  merkle-block
-  $:  =block-header
+  $:  block-header
+      partial-merkle-tree
+  ==
++$  partial-merkle-tree
+  $:  total-txs=@ud
       hashes=(list @ux)
       flags=(list flag)
   ==

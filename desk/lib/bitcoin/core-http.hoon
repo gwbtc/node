@@ -65,7 +65,7 @@
         [%get-block-header-batch block-hashes=(list block-hash)]
         [%get-block =block-hash]
         [%get-transaction =block-hash =txid]
-        [%get-merkle-proof =block-hash =txid]
+        [%get-merkle-block =block-hash txs=(list txid)]
     ==
   +$  response
     $%  [%get-block-count =block-height]
@@ -75,7 +75,7 @@
         [%get-block-header-batch batch=(list (pair block-height block-header))]
         [%get-block =block]
         [%get-transaction =transaction]
-        [%get-merkle-proof =merkle-block]
+        [%get-merkle-block =merkle-block]
     ==
   ::
   ++  make-request
@@ -117,6 +117,7 @@
         %get-block-header
       %:  make-request-object  -.req  %getblockheader
       :~  [%s (en:base16:mimes:html 32 block-hash.req)]
+          [%b |]  :: least verbosity
       ==  ==
     ::
         %get-block-hash-batch
@@ -134,6 +135,7 @@
       |=  haz=block-hash
       %:  make-request-object  -.req  %getblockheader
       :~  [%s (en:base16:mimes:html 32 haz)]
+          [%b &]  :: full verbosity
       ==  ==
     ::
         %get-block
@@ -145,13 +147,13 @@
         %get-transaction
       %:  make-request-object  -.req  %getrawtransaction
       :~  [%s (en:base16:mimes:html 32 txid.req)]
-          [%b &]  :: full verbosity
+          [%b |]  :: least verbosity
           [%s (en:base16:mimes:html 32 block-hash.req)]
       ==  ==
     ::
-        %get-merkle-proof
+        %get-merkle-block
       %:  make-request-object  -.req  %gettxoutproof
-      :~  [%a [[%s (en:base16:mimes:html 32 txid.req)] ~]]
+      :~  [%a (turn txs.req |=(txn=txid [%s (en:base16:mimes:html 32 txn)]))]
           [%s (en:base16:mimes:html 32 block-hash.req)]
       ==  ==
     ::
@@ -179,10 +181,10 @@
       ?+  tag  !!
         %get-block-count   [tag ud:res]
         %get-block-hash    [tag ux:res]
-        %get-block-header  [tag (json-to-block-header jo:res)]
-        %get-block         [tag (json-to-block jo:res)]
-        %get-transaction   [tag (json-to-transaction jo:res)]
-        %get-merkle-proof  [tag (json-to-merkle-block jo:res)]
+        %get-block-header  [tag -:de-block-header:(de-abed:de:b-ser ux-rev:res)]
+        %get-block         [tag -:de-block:(de-abed:de:b-ser ux-rev:res)]
+        %get-transaction   [tag -:de-transaction:(de-abed:de:b-ser ux-rev:res)]
+        %get-merkle-block  [tag -:de-merkle-block:(de-abed:de:b-ser ux-rev:res)]
       ==
     ::
         [%a *]
@@ -240,22 +242,6 @@
         ['params' [%a params]]
     ==
   ::
-  ++  json-to-merkle-block
-    |=  jon=json
-    ^-  merkle-block
-    =/  dat  (rev 3 ~(ux-b dj jon))
-    =/  de-core  (de-abed:de:b-ser dat)
-    =>  de-merkle-block:de-core
-        -
-  ::
-  ++  json-to-block
-    |=  jon=json
-    ^-  block
-    =/  dat  (rev 3 ~(ux-b dj jon))
-    =/  de-core  (de-abed:de:b-ser dat)
-    =>  de-block:de-core
-        -
-  ::
   ++  json-to-block-header
     |=  jon=json
     ^-  block-header
@@ -267,37 +253,6 @@
         ud:(got:dej 'time')
         ux:(got:dej 'bits')
         ux:(got:dej 'nonce')
-    ==
-  ::
-  ++  json-to-transaction
-    |=  jon=json
-    ^-  transaction
-    =/  dej  ~(. dj jon)
-    :*  ux:(got:dej 'version')
-        ud:(got:dej 'locktime')
-        %+  murn  li:(got:dej 'vin')
-        |=  jom=json
-        ^-  (unit transaction-input)
-        =.  dej  ~(. dj jom)
-        ?:  (has:dej 'coinbase')  ~
-        :-  ~
-        :*  ux:(got:dej 'txid')
-            ud:(got:dej 'vout')
-            ux-b:(got:(got:dej 'scriptSig') 'hex')
-            ux:(got:dej 'sequence')
-            ?.  (has:dej 'txinwitness')  ~
-            %+  turn  li:(got:dej 'txinwitness')
-            |=  j=json
-            %~  ux-b  dj  j
-        ==
-        %+  turn  li:(got:dej 'vout')
-        |=  jom=json
-        ^-  transaction-output
-        =.  dej  ~(. dj jom)
-        =/  sat  t:(got:dej 'value')
-        =/  pub  (got:dej 'scriptPubKey')
-        :-  (scan (skip (trip sat) |=(c=@t =('.' c))) dem)
-            ux-b:(got:pub 'hex')
     ==
   ::
   --
@@ -349,18 +304,13 @@
       [%n *]  (rash p.jon dem)
     ==
   ::
-  ++  ux-b
-    ^-  hexb
+  ++  ux-rev
+    ^-  @ux
     ?>  ?=([%s *] jon)
+    %+  rev  3
     %-  need
     %-  de:base16:mimes:html
         p.jon
-  ::
-  ++  da
-    ^-  @da
-    ?>  ?=([%n *] jon)
-    %-  from-unix:chrono:userlib
-    %+  rash  p.jon  dem
   ::
   --
 ::

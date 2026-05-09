@@ -13,26 +13,16 @@
   ==
 ++  params
   |%
+  ++  min-transaction-weight  (mul witness-scale-factor 60)
+  ++  witness-scale-factor                4
+  ++  max-block-weight            4.000.000
+  ::
   ++  max-future-block-time             ~h2
   ++  past-median-timespan               11  :: blocks
   ++  difficulty-adjustment-interval  2.016  :: blocks
   ++  pow-target-timespan              ~d14
   ++  pow-limit  0xffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff.ffff
   --
-::
-++  hash-block-header
-  |=  hed=block-header
-  ^-  block-hash
-  %+  shay  32
-  %+  shay  80
-  %+  can  3
-  :~  4^version.hed
-     32^previous-block-hash.hed
-     32^merkle-root.hed
-      4^time.hed
-      4^bits.hed
-      4^nonce.hed
-  ==
 ::
 :: +he
 ::   block header validation core            :: NOTE: currently assumes mainnet
@@ -70,7 +60,7 @@
     ?:  =(0 het)
       %-  validate-genesis-block-header
           hed
-    =/  haz  (hash-block-header hed)
+    =/  haz  (make-block-hash:b-ser hed)
     =/  lot
       =/  beg
         ?:  (lte het past-median-timespan)  ~
@@ -86,7 +76,7 @@
       %-  need
       %-  ram:on-block-headers
           lot
-    =/  prev-hash  (hash-block-header val.pre)
+    =/  prev-hash  (make-block-hash:b-ser val.pre)
     =/  block-time  (from-unix:chrono:userlib time.hed)
     =/  median-time-past
       %-  from-unix:chrono:userlib
@@ -153,6 +143,169 @@
       valid-time-upper-bound  =(time.hed time.gen)
       valid-pow               |
     ==
+  ::
+  --
+::
+:: +me
+::   merkle block core
+++  me
+  |_  mer=merkle-block
+  ++  me-core  .
+  ++  me-give  |=(arg=merkle-block me-core(mer arg))
+  ++  me-take  mer
+  ++  me-make
+    |=  [txs=(set txid) bok=block]
+    =;  mep
+      %_  me-core
+          mer  [-.bok mep]
+      ==
+    %-  build-partial-merkle-tree
+    %+  turn  txs.bok
+    |=  txn=transaction
+    =/  tid  (make-txid:b-ser txn)
+    :-  (~(has in txs) tid)
+        tid
+  ::
+  ++  me-verify
+    |=  [hed=block-header txs=(set txid)]
+    ^-  ?
+    ?.  validate-merkle-block  |
+    =/  has-txs
+      ^-  ?
+      =/  haz  (silt hashes.mer)
+      %-  ~(all in txs)
+      |=  txn=txid
+      %-  ~(has in haz)
+          txn
+    ?.  &(has-txs =(hed -.mer))  |
+    =/  [rot=@ux mur=merkle-block]  extract-merkle-root
+    =/  consumed-except-padding
+      ^-  ?
+      =/  len  (lent flags.mur)
+      ?:  (gte len 8)  |
+      %+  levy  flags.mur
+      |=  lag=flag
+      .=  0
+          lag
+    ?.  &(consumed-except-padding ?=(~ hashes.mur))  |
+    .=  merkle-root.hed
+        rot
+  ::
+  ++  validate-merkle-block
+    ^-  ?
+    =,  params
+    =/  hash-len  (lent hashes.mer)
+    =/  flag-len  (lent flags.mer)
+    ?!
+    ?|  =(0 total-txs.mer)
+        (gth total-txs.mer (div max-block-weight min-transaction-weight))
+        (gth hash-len total-txs.mer)
+        (lth flag-len hash-len)
+    ==
+  ::
+  ++  extract-merkle-root
+    =/  pos  0
+    =/  het  (calc-tree-height total-txs.mer)
+    |-
+    ^-  [@ux merkle-block]
+    =^  parent-of-match  mer
+      :-  (head flags.mer)
+      %_  mer
+          flags  (tail flags.mer)
+      ==
+    ?:  ?|  =(0 het)
+            !parent-of-match
+        ==
+      :-  (head hashes.mer)
+      %_  mer
+          hashes  (tail hashes.mer)
+      ==
+    =:  het  (dec het)
+        pos  (mul pos 2)
+      ==
+    =^  lef  mer  $
+    =^  rig  mer
+      =.  pos  +(pos)
+      ?:  (lth pos (calc-tree-width het total-txs.mer))  $
+      :-  lef  mer
+    :_  mer
+    %+  shay  64
+    %+  can  3
+    :~  32^lef
+        32^rig
+    ==
+  ::
+  ++  build-partial-merkle-tree
+    |=  block-txs=(list [match=? =txid])
+    ^-  partial-merkle-tree
+    =/  pos  0
+    =/  tot  (lent block-txs)
+    =/  het  (calc-tree-height tot)
+    =/  acc  %*(p p=*partial-merkle-tree total-txs tot)
+    |^
+    ^-  partial-merkle-tree
+    =/  parent-of-match
+      ^-  ?
+      =/  p  (lsh [0 het] pos)
+      |-
+      ?.  &((lth p (lsh [0 het] +(pos))) (lth p total-txs.acc))  |
+      ?:  match:(snag p block-txs)  &
+      %=  $
+          p  +(p)
+      ==
+    =.  flags.acc  [parent-of-match flags.acc]
+    ?:  ?|  =(0 het)
+            !parent-of-match
+        ==
+      %_  acc
+          hashes  [calc-hash hashes.acc]
+      ==
+    =:  het  (dec het)
+        pos  (mul pos 2)
+      ==
+    =.  acc  $
+    =.  pos  +(pos)
+    ?:  (lth pos (calc-tree-width het total-txs.acc))  $
+    acc
+    ::
+    ++  calc-hash
+      ^-  @ux
+      ?:  =(0 het)  txid:(snag pos block-txs)
+      =:  het  (dec het)
+          pos  (mul pos 2)
+        ==
+      =/  lef  calc-hash
+      =/  rig
+        =.  pos  +(pos)
+        ?:  (lth pos (calc-tree-width het total-txs.acc))  calc-hash
+        lef
+      %+  shay  64
+      %+  can  3
+      :~  32^lef
+          32^rig
+      ==
+    ::
+    --
+  ::
+  ++  calc-tree-height
+    |=  total-txs=@ud
+    ^-  @ud
+    ?<  =(0 total-txs)
+    =/  het  0
+    |-
+    =/  wid  (calc-tree-width het total-txs)
+    ?:  =(1 wid)  het
+    %=  $
+        het  +(het)
+    ==
+  ::
+  ++  calc-tree-width
+    |=  [height=@ud total-txs=@ud]
+    ^-  @ud
+    %+  rsh  [0 height]
+    %+  add  total-txs
+    %+  sub  (lsh [0 height] 1)
+        1
   ::
   --
 ::

@@ -1,6 +1,20 @@
 /-  *bitcoin-common
 |%
 ::
+++  make-block-hash
+  |=  hed=block-header
+  ^-  block-hash
+  %+  shay  32
+  %-  shay
+      en-abet:(en-block-header:en hed)
+::
+++  make-txid
+  |=  txn=transaction
+  ^-  txid
+  %+  shay  32
+  %-  shay
+      en-abet:(en-legacy-transaction:en txn)
+::
 ++  de-compact-target
   |=  bis=@ux
   ^-  @ux
@@ -23,26 +37,138 @@
       1^siz
   ==
 ::
-++  en-compactsize
-  |=  aum=@
-  ^-  hexb
-  ?:  (lte aum 0xfc)  1^aum
-  =/  len  (met 3 aum)
-  ?:  (lte len 2)  3^(can 3 ~[2^(rev 3 2^aum) 1^0xfd])
-  ?:  (lte len 4)  5^(can 3 ~[4^(rev 3 4^aum) 1^0xfe])
-  ?:  (lte len 8)  9^(can 3 ~[8^(rev 3 8^aum) 1^0xff])
-  ~|  %invalid-compactsize
-  !!
+:: +en
+::   serialization core
+++  en
+  |_  byt=hexb
+  ++  en-core  .
+  ++  en-abet  byt
+  ++  en-prep
+    |=  [wid=@ dat=@]
+    %_  en-core
+        wid.byt  (add wid.byt wid)
+        dat.byt  (can 3 [byt wid^dat ~])
+    ==
+  ::
+  ++  en-compactsize
+    |=  aum=@
+    ^+  en-core
+    ?:  (lte aum 0xfc)  (en-prep 1 aum)
+    =/  len  (met 3 aum)
+    ?:  (lte len 2)  (en-prep 1 0xfd):(en-prep 2 (rev 3 2^aum))
+    ?:  (lte len 4)  (en-prep 1 0xfe):(en-prep 4 (rev 3 4^aum))
+    ?:  (lte len 8)  (en-prep 1 0xff):(en-prep 8 (rev 3 8^aum))
+    ~|  %invalid-compactsize
+    !!
+  ::
+  ++  en-block
+    |=  bok=block
+    ^+  en-core
+    =.  en-core  (en-block-header -.bok)
+    =.  en-core  (en-compactsize (lent txs.bok))
+    |-
+    ?~  txs.bok  en-core
+    =.  en-core
+      ?+  flag.i.txs.bok
+              (en-segwit-transaction i.txs.bok)
+          %0  (en-legacy-transaction i.txs.bok)
+      ==
+    %=  $
+        txs.bok  t.txs.bok
+    ==
+  ::
+  ++  en-block-header
+    |=  hed=block-header
+    =.  en-core  (en-prep 4 version.hed)
+    =.  en-core  (en-prep 32 previous-block-hash.hed)
+    =.  en-core  (en-prep 32 merkle-root.hed)
+    =.  en-core  (en-prep 4 time.hed)
+    =.  en-core  (en-prep 4 bits.hed)
+    =.  en-core  (en-prep 4 nonce.hed)
+        en-core
+  ::
+  ++  en-legacy-transaction
+    |=  txn=transaction
+    =.  en-core  (en-prep 4 version.txn)
+    =.  en-core  (en-transaction-inputs inputs.txn)
+    =.  en-core  (en-transaction-outputs outputs.txn)
+    =.  en-core  (en-prep 4 locktime.txn)
+        en-core
+  ::
+  ++  en-segwit-transaction
+    |=  txn=transaction
+    =.  en-core  (en-prep 4 version.txn)
+    =.  en-core  (en-prep 1 0x0)
+    =.  en-core  (en-prep 1 flag.txn)
+    =.  en-core  (en-transaction-inputs inputs.txn)
+    =.  en-core  (en-transaction-outputs outputs.txn)
+    =.  en-core  (en-transaction-witness inputs.txn)
+    =.  en-core  (en-prep 4 locktime.txn)
+        en-core
+  ::
+  ++  en-transaction-inputs
+    |=  ins=(list transaction-input)
+    =.  en-core  (en-compactsize (lent ins))
+    |-
+    ?~  ins  en-core
+    =.  en-core  (en-transaction-input i.ins)
+    %=  $
+        ins  t.ins
+    ==
+  ::
+  ++  en-transaction-input
+    |=  inp=transaction-input
+    =.  en-core  (en-prep 32 txid.inp)
+    =.  en-core  (en-prep 4 vout.inp)
+    =.  en-core  (en-compactsize wid.script-sig.inp)
+    =.  en-core  (en-prep script-sig.inp)
+    =.  en-core  (en-prep 4 sequence.inp)
+        en-core
+  ::
+  ++  en-transaction-outputs
+    |=  ous=(list transaction-output)
+    =.  en-core  (en-compactsize (lent ous))
+    |-
+    ?~  ous  en-core
+    =.  en-core  (en-transaction-output i.ous)
+    %=  $
+        ous  t.ous
+    ==
+  ::
+  ++  en-transaction-output
+    |=  out=transaction-output
+    =.  en-core  (en-prep 8 value.out)
+    =.  en-core  (en-compactsize wid.script-pubkey.out)
+    =.  en-core  (en-prep script-pubkey.out)
+        en-core
+  ::
+  ++  en-transaction-witness
+    |=  ins=(list transaction-input)
+    ?~  ins  en-core
+    =*  wit  witness.i.ins
+    =.  en-core  (en-compactsize (lent wit))
+    =.  en-core
+      |-
+      ?~  wit  en-core
+      =.  en-core  (en-compactsize wid.i.wit)
+      =.  en-core  (en-prep i.wit)
+      %=  $
+          wit  t.wit
+      ==
+    %=  $
+        ins  t.ins
+    ==
+  ::
+  --
 ::
 :: +de
-::   deserialization core (little endian)
+::   deserialization core
 ++  de
   |_  dat=@ux
   ++  de-core  .
   ++  de-abed  |=(leb=@ux de-core(dat leb))
   ++  de-read  |=(wid=@ud [(end [3 wid] dat) de-core(dat (rsh [3 wid] dat))])
   ++  de-peek  |=(wid=@ud (end [3 wid] dat))
-  ++  de-skip  |=(wid=@ud de-core(dat (rsh [3 wid] dat)))
   ::
   ++  de-compactsize
     ^-  [@ud _de-core]
@@ -92,8 +218,11 @@
   ++  de-transaction
     ^-  [transaction _de-core]
     =^  version  de-core  (de-read 4)
-    =/  is-segwit  =(0x100 (de-peek 2))
-    =?  de-core  is-segwit  (de-skip 2)
+    =/  is-segwit  =(0x0 (de-peek 1))
+    =^  tx-flag  de-core
+      ?.  is-segwit  [0 de-core]
+      =^  marker  de-core  (de-read 1)
+      %-  de-read  1
     =^  input-n  de-core  de-compactsize
     =^  inputs   de-core
       =/  ins  *(list transaction-input)
@@ -165,14 +294,23 @@
     =^  locktime  de-core  (de-read 4)
     :_  de-core
     :*  version
-        locktime
+        tx-flag
         inputs
         outputs
+        locktime
     ==
   ::
   ++  de-merkle-block
     ^-  [merkle-block _de-core]
-    =^  block-header  de-core  de-block-header
+    =^  block-header         de-core  de-block-header
+    =^  partial-merkle-tree  de-core  de-partial-merkle-tree
+    :_  de-core
+    :*  block-header
+        partial-merkle-tree
+    ==
+  ::
+  ++  de-partial-merkle-tree
+    ^-  [partial-merkle-tree _de-core]
     =^  tx-count      de-core  (de-read 4)
     =^  hash-count    de-core  de-compactsize
     =^  hashes  de-core
@@ -192,10 +330,10 @@
       =^  fiz  de-core  (de-read 1)
       %=  $
           flag-count  (dec flag-count)
-          faz         [((list flag) (rip [0 1] fiz)) faz]
+          faz         [(turn (rip [0 1] fiz) |=(n=@ !(? n))) faz]
       ==
     :_  de-core
-    :*  block-header
+    :*  tx-count
         hashes
         flags
     ==
