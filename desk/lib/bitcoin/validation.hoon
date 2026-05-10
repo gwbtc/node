@@ -184,9 +184,8 @@
       =/  len  (lent flags.mur)
       ?:  (gte len 8)  |
       %+  levy  flags.mur
-      |=  lag=flag
-      .=  0
-          lag
+      |=  f=flag
+      ?!  f
     ?.  &(consumed-except-padding ?=(~ hashes.mur))  |
     .=  merkle-root.hed
         rot
@@ -229,6 +228,7 @@
       ?:  (lth pos (calc-tree-width het total-txs.mer))  $
       :-  lef  mer
     :_  mer
+    %+  shay  32
     %+  shay  64
     %+  can  3
     :~  32^lef
@@ -253,12 +253,12 @@
       %=  $
           p  +(p)
       ==
-    =.  flags.acc  [parent-of-match flags.acc]
+    =.  flags.acc  (snoc flags.acc parent-of-match)
     ?:  ?|  =(0 het)
             !parent-of-match
         ==
       %_  acc
-          hashes  [calc-hash hashes.acc]
+          hashes  (snoc hashes.acc calc-hash)
       ==
     =:  het  (dec het)
         pos  (mul pos 2)
@@ -279,6 +279,7 @@
         =.  pos  +(pos)
         ?:  (lth pos (calc-tree-width het total-txs.acc))  calc-hash
         lef
+      %+  shay  32
       %+  shay  64
       %+  can  3
       :~  32^lef

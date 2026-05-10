@@ -326,11 +326,17 @@
     =^  flags  de-core
       =/  faz  *(list (list flag))
       |-
-      ?:  =(0 flag-count)  [(flop `(list flag)`(zing faz)) de-core]
-      =^  fiz  de-core  (de-read 1)
+      ?:  =(0 flag-count)  [(zing (flop faz)) de-core]
+      =^  biz  de-core  (de-read 1)
+      =/  fiz
+        %^  spin  (rip [0 1] biz)  0
+        |=  [n=@ a=@]
+        :-  !(? n)
+            +(a)
+      =/  pad  (reap (sub 8 q.fiz) |)
       %=  $
           flag-count  (dec flag-count)
-          faz         [(turn (rip [0 1] fiz) |=(n=@ !(? n))) faz]
+          faz         [(weld p.fiz pad) faz]
       ==
     :_  de-core
     :*  tx-count
