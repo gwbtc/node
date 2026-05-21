@@ -49,7 +49,7 @@
   ::   ?^  res  res
   ::   %=  $
   ::     mor  t.mor
-  ::     hes  (put:on-block-headers hes i.mor)            :: NOTE: headers type change
+  ::     hes  (put:on-block-headers hes i.mor)
   ::   ==
   ::
   ++  validate-block-header
@@ -85,7 +85,7 @@
         ==
       :+  %.y
           het
-          0    :: TODO: chainwork
+          (calc-new-chainwork target chainwork.prev)
     :-  %.n
         val
     ::
@@ -145,17 +145,26 @@
     ?:  =(hed gen)
       :+  %.y
           0
-          0  :: TODO: chainwork
+          (calc-new-chainwork (de-compact-target:b-ser bits.gen) 0)
     :-  %.n
     =/  hed-hash  (make-block-hash:b-ser hed)
     =/  gen-hash  (make-block-hash:b-ser gen)
-    %*  p  p=*validation-checks
-      valid-prev-hash         =(previous-block-hash.hed previous-block-hash.gen)
-      valid-work-required     =(bits.hed bits.gen)
-      valid-time-lower-bound  =(time.hed time.gen)
-      valid-time-upper-bound  =(time.hed time.gen)
-      valid-pow               =(hed-hash gen-hash)
+    %*  p
+        p=*validation-checks
+        valid-prev-hash         =(previous-block-hash.hed previous-block-hash.gen)
+        valid-work-required     =(bits.hed bits.gen)
+        valid-time-lower-bound  =(time.hed time.gen)
+        valid-time-upper-bound  =(time.hed time.gen)
+        valid-pow               =(hed-hash gen-hash)
     ==
+  ::
+  ++  calc-new-chainwork
+    |=  [tar=@ud wok=chainwork]
+    ^-  chainwork
+    %+  add  wok
+    %+  div
+        (pow 2 256)
+        +(tar)
   ::
   --
 ::
