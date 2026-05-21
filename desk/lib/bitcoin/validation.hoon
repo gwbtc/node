@@ -30,9 +30,8 @@
   |_  [now=time hes=block-headers]
   ::
   +$  validation-result
-    $@  %.y
-    $:  failed-at=block-height
-        validation-checks
+    $%  [%.y =block-height =chainwork]
+        [%.n validation-checks]
     ==
   +$  validation-checks
     $:  valid-prev-hash=?
@@ -42,82 +41,41 @@
         valid-pow=?
     ==
   ::
-  ++  validate-block-headers
-    |=  mor=(list [block-height block-header])
-    ^-  validation-result
-    ?~  mor  %.y
-    =/  res  (validate-block-header i.mor)
-    ?^  res  res
-    %=  $
-      mor  t.mor
-      hes  (put:on-block-headers hes i.mor)
-    ==
+  :: ++  validate-block-headers
+  ::   |=  mor=(list block-header)
+  ::   ^-  validation-result
+  ::   ?~  mor  %.y
+  ::   =/  res  (validate-block-header i.mor)
+  ::   ?^  res  res
+  ::   %=  $
+  ::     mor  t.mor
+  ::     hes  (put:on-block-headers hes i.mor)            :: NOTE: headers type change
+  ::   ==
   ::
   ++  validate-block-header
-    |=  [het=block-height hed=block-header]
+    |=  hed=block-header
     ^-  validation-result
     =,  params
-    ?:  =(0 het)
+    ?:  =(0x0 previous-block-hash.hed)
       %-  validate-genesis-block-header
           hed
-    =/  haz  (make-block-hash:b-ser hed)
-    =/  lot
-      =/  beg
-        ?:  (lte het past-median-timespan)  ~
-        :-  ~
-        %+  sub
-            het
-        .+  past-median-timespan
-      %^  lot:on-block-headers
-          hes
-          beg
-          [~ het]
-    =/  pre
-      %-  need
-      %-  ram:on-block-headers
-          lot
-    =/  prev-hash  (make-block-hash:b-ser val.pre)
-    =/  block-time  (from-unix:chrono:userlib time.hed)
-    =/  median-time-past
-      %-  from-unix:chrono:userlib
-      =/  lis
-        %+  sort  (tap:on-block-headers lot)
-        |=  [a=[block-height block-header] b=[block-height block-header]]
-        %+  lth
-            time.a
-            time.b
-      =<  time.val
-      %+  snag
-          (div (lent lis) 2)
-          lis
-    =/  target  (de-compact-target:b-ser bits.hed)
-    =/  next-work-required
-      ^-  @ux
-      ?.  =(0 (mod het difficulty-adjustment-interval))  bits.val.pre
-      =/  epoch-first
-        %+  got:on-block-headers
-            hes
-            (sub het difficulty-adjustment-interval)
-      =/  actual-timespan
-        %+  sub
-        %-  from-unix:chrono:userlib  time.val.pre
-        %-  from-unix:chrono:userlib  time.epoch-first
-      =.  actual-timespan  (max actual-timespan (div pow-target-timespan 4))
-      =.  actual-timespan  (min actual-timespan (mul pow-target-timespan 4))
-      =/  previous-target  (de-compact-target:b-ser bits.val.pre)
-      =/  next-target
-        %+  min
-            pow-limit
-            (div (mul previous-target actual-timespan) pow-target-timespan)
-      %-  en-compact-target:b-ser
-          next-target
+    =/  prev       (~(got by hes) previous-block-hash.hed)
+    =/  this-hash  (make-block-hash:b-ser hed)
+    =/  prev-hash  (make-block-hash:b-ser block-header.prev)
+    =/  het        +(block-height.prev)
+    |^
+    =/  block-time          (from-unix:chrono:userlib time.hed)
+    =/  median-time-past    get-median-time-past
+    =/  target              (de-compact-target:b-ser bits.hed)
+    =/  next-work-required  get-next-work-required
     =/  val
-      %*  p  p=*validation-checks
-        valid-prev-hash         =(prev-hash previous-block-hash.hed)
-        valid-work-required     =(bits.hed next-work-required)
-        valid-time-lower-bound  (gth block-time median-time-past)
-        valid-time-upper-bound  (lte block-time (add now max-future-block-time))
-        valid-pow               (lte haz target)
+      %*  p
+          p=*validation-checks
+          valid-prev-hash         =(prev-hash previous-block-hash.hed)
+          valid-work-required     =(bits.hed next-work-required)
+          valid-time-lower-bound  (gth block-time median-time-past)
+          valid-time-upper-bound  (lte block-time (add now max-future-block-time))
+          valid-pow               (lte this-hash target)
       ==
     ?:  ?&  valid-prev-hash.val
             valid-work-required.val
@@ -125,23 +83,78 @@
             valid-time-upper-bound.val
             valid-pow.val
         ==
-      %.y
-    :*  het
+      :+  %.y
+          het
+          0    :: TODO: chainwork
+    :-  %.n
         val
-    ==
+    ::
+    ++  get-median-time-past
+      ^-  @da
+      =/  lis
+        =/  num  past-median-timespan
+        |-
+        ^-  (list @ud)
+        ?:  =(0 num)  ~
+        ?:  =(0 het)  ~
+        =:  num  (dec num)
+            het  (dec het)
+            hed  block-header:(~(got by hes) previous-block-hash.hed)
+          ==
+        :-  time.hed
+            $
+      %-  from-unix:chrono:userlib
+      %+  snag
+          (div (lent lis) 2)
+          (sort lis lth)
+    ::
+    ++  get-next-work-required
+      ^-  @ux
+      ?.  =(0 (mod het difficulty-adjustment-interval))  bits.block-header.prev
+      =/  epoch-first
+        ^-  block-header
+        =/  num  difficulty-adjustment-interval
+        |-
+        ?:  =(0 num)  hed
+        ?:  =(0 het)  hed
+        %=  $
+            num  (dec num)
+            het  (dec het)
+            hed  block-header:(~(got by hes) previous-block-hash.hed)
+        ==
+      =/  actual-timespan
+        %+  sub
+        %-  from-unix:chrono:userlib  time.block-header.prev
+        %-  from-unix:chrono:userlib  time.epoch-first
+      =.  actual-timespan  (max actual-timespan (div pow-target-timespan 4))
+      =.  actual-timespan  (min actual-timespan (mul pow-target-timespan 4))
+      =/  previous-target  (de-compact-target:b-ser bits.block-header.prev)
+      =/  next-target
+        %+  min
+            pow-limit
+            (div (mul previous-target actual-timespan) pow-target-timespan)
+      %-  en-compact-target:b-ser
+          next-target
+    ::
+    --
   ::
   ++  validate-genesis-block-header
     |=  hed=block-header
     ^-  validation-result
     =/  gen  genesis-block-header
-    ?:  =(hed gen)  %.y
-    :-  0
+    ?:  =(hed gen)
+      :+  %.y
+          0
+          0  :: TODO: chainwork
+    :-  %.n
+    =/  hed-hash  (make-block-hash:b-ser hed)
+    =/  gen-hash  (make-block-hash:b-ser gen)
     %*  p  p=*validation-checks
       valid-prev-hash         =(previous-block-hash.hed previous-block-hash.gen)
       valid-work-required     =(bits.hed bits.gen)
       valid-time-lower-bound  =(time.hed time.gen)
       valid-time-upper-bound  =(time.hed time.gen)
-      valid-pow               |
+      valid-pow               =(hed-hash gen-hash)
     ==
   ::
   --
@@ -309,8 +322,6 @@
         1
   ::
   --
-::
-++  on-block-headers  ((on block-height block-header) lth)
 ::
 --
 

@@ -3,12 +3,16 @@
     b-ser=bitcoin-serialization,
     b-http=bitcoin-core-http
 |%
++$  candidate-chain-tips  (set block-hash)
++$  bh-index  ((mop block-height block-hash) lth)
+::
 +$  core-http-config  $@(~ node-config:b-http)
 ::
 +$  state-0
   $:  =core-http-config
+      =candidate-chain-tips
+      =bh-index
       =block-headers
-      test-headers=(list [block-height block-header])
   ==
 +$  state-n
   $%  [%0 state-0]
@@ -120,23 +124,24 @@
       ?+  -.res  !!
       ::
           %get-block-header-batch
-        =/  val
-          %.  batch.res
-          %~  validate-block-headers  he:b-val
-          :-  now.bowl
-              block-headers
-        ?^  val
-          ~&  >>>  ['header validation failed:' val]
-          !!
-        =.  block-headers  (gas:on-block-headers block-headers batch.res)
-        =/  nex  (add het (lent batch.res))
-        ?>  ?=(^ core-http-config)
-        %-  emit
-        %:  make-request:json-rpc:b-http
-            /core-http/json-rpc/block-hash-batch/[(scot %ud nex)]/[now-t]
-            core-http-config
-            [%get-block-hash-batch nex 100]
-        ==
+        cor
+        ::=/  val
+        ::  %.  batch.res
+        ::  %~  validate-block-headers  he:b-val
+        ::  :-  now.bowl
+        ::      block-headers
+        ::?^  val
+        ::  ~&  >>>  ['header validation failed:' val]
+        ::  !!
+        ::=.  block-headers  (gas:on-block-headers block-headers batch.res)
+        ::=/  nex  (add het (lent batch.res))
+        ::?>  ?=(^ core-http-config)
+        ::%-  emit
+        ::%:  make-request:json-rpc:b-http
+        ::    /core-http/json-rpc/block-hash-batch/[(scot %ud nex)]/[now-t]
+        ::    core-http-config
+        ::    [%get-block-hash-batch nex 100]
+        ::==
       ::
       ==
     ::
@@ -153,7 +158,7 @@
 ::
 ++  now-t  (scot %da now.bowl)
 ::
-++  on-block-headers  ((on block-height block-header) lth)
+++  on-bh-index  ((on block-height block-hash) lth)
 ::
   ::
 ::

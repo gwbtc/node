@@ -32,7 +32,15 @@
 +$  witness-stack        (list hexb)
 +$  transaction-witness  (list witness-stack)
 ::
-+$  block-headers  ((mop block-height block-header) lth)
++$  chainwork  @ud
+::
++$  block-headers
+  %+  map
+      block-hash
+  $:  =block-height
+      =chainwork
+      =block-header
+  ==
 +$  block-header
   $:  version=@ux
       previous-block-hash=@ux
