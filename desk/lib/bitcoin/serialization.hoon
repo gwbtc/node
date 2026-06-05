@@ -1,4 +1,5 @@
-/-  *bitcoin-common
+/-  *bitcoin-common,
+    network=bitcoin-network
 |%
 ::
 ++  make-block-hash
@@ -68,11 +69,7 @@
     =.  en-core  (en-compactsize (lent txs.bok))
     |-
     ?~  txs.bok  en-core
-    =.  en-core
-      ?+  flag.i.txs.bok
-              (en-segwit-transaction i.txs.bok)
-          %0  (en-legacy-transaction i.txs.bok)
-      ==
+    =.  en-core  (en-transaction i.txs.bok)
     %=  $
         txs.bok  t.txs.bok
     ==
@@ -86,6 +83,13 @@
     =.  en-core  (en-prep 4 bits.hed)
     =.  en-core  (en-prep 4 nonce.hed)
         en-core
+  ::
+  ++  en-transaction
+    |=  txn=transaction
+    ?+  flag.txn
+            (en-segwit-transaction txn)
+        %0  (en-legacy-transaction txn)
+    ==
   ::
   ++  en-legacy-transaction
     |=  txn=transaction
@@ -157,6 +161,206 @@
       ==
     %=  $
         ins  t.ins
+    ==
+  ::
+  ++  en-network-magic-bytes
+    |=  net=network:network
+    %+  en-prep    4
+    ?-  net
+        %mainnet   0xd9b4.bef9
+        %testnet   0xdab5.bffa
+        %testnet3  0x709.110b
+        %testnet4  0x283f.161c
+        %signet    0x40cf.030a
+    ==
+  ::
+  ++  en-network-address-id
+    |=  nid=address-network-id:network
+    %+  en-prep     1
+    ?-  nid
+        %ipv4       0x1
+        %ipv6       0x2
+        %torv2      0x3
+        %torv3      0x4
+        %i2p        0x5
+        %cjdns      0x6
+        %yggdrasil  0x7
+    ==
+  ::
+  ++  en-network-services
+    |=  ser=services:network
+    %+  en-prep  8
+    %+  con  (lsh [0 0] !node-network.ser)
+    %+  con  (lsh [0 2] !node-bloom.ser)
+    %+  con  (lsh [0 3] !node-witness.ser)
+    %+  con  (lsh [0 6] !node-compact-filters.ser)
+    %+  con  (lsh [0 10] !node-network-limited.ser)
+    %+  con  (lsh [0 11] !node-p2p-v2.ser)
+    0
+  ::
+  ++  en-network-address-v1-partial
+    |=  adr=address-v1-partial:network
+    =.  en-core  (en-network-services services.adr)
+    =.  en-core  (en-prep 16 ip.adr)
+    =.  en-core  (en-prep 2 port.adr)
+        en-core
+  ::
+  ++  en-network-address-v1
+    |=  adr=address-v1:network
+    =.  en-core  (en-prep 4 time.adr)
+    %-  en-network-address-v1-partial
+        +.adr
+  ::
+  ++  en-network-address-v2
+    |=  adr=address-v2:network
+    =.  en-core  (en-prep 4 time.adr)
+    =.  en-core  (en-compactsize dat:en-abet:(en-network-services:en services.adr))
+    =.  en-core  (en-network-address-id id.adr)
+    =.  en-core  (en-prep address.adr)
+    =.  en-core  (en-prep 2 port.adr)
+        en-core
+  ::
+  ++  en-network-block-locator
+    |=  loc=block-locator:network
+    =.  en-core  (en-prep 4 protocol-version.loc)
+    =.  en-core  (en-compactsize (lent locator.loc))
+    |-
+    ?~  locator.loc  en-core
+    =.  en-core  (en-prep 32 i.locator.loc)
+    %=  $
+        locator.loc  t.locator.loc
+    ==
+  ::
+  ++  en-network-inventory
+    |=  inv=inventory:network
+    =/  witness-flag  msg-witness-flag:network
+    =.  en-core  (en-compactsize (lent inv))
+    |^
+    ?~  inv  en-core
+    =.  en-core  (en-prep 4 (inv-type-to-num type.i.inv))
+    =.  en-core  (en-prep 32 hash.i.inv)
+    %=  $
+        inv  t.inv
+    ==
+    ++  inv-type-to-num
+      |=  typ=inventory-type:network
+      ^-  @ud
+      ?-  typ
+          %undefined           0
+          %msg-tx              1
+          %msg-block           2
+          %msg-wtx             5
+          %msg-filtered-block  3
+          %msg-cmpct-block     4
+          %msg-witness-block   (con (inv-type-to-num %msg-block) witness-flag)
+          %msg-witness-tx      (con (inv-type-to-num %msg-tx) witness-flag)
+      ==
+    --
+  ::
+  ++  en-network-message
+    |=  [net=network:network msg=message:network]
+    =/  payload  en-abet:(en-network-message-payload:en msg)
+    =.  en-core  (en-network-magic-bytes net)
+    =.  en-core  (en-prep 12 -.msg)
+    =.  en-core  (en-prep 4 wid.payload)
+    =.  en-core  (en-prep 4 (end [3 4] (shay 32 (shay payload))))
+    =.  en-core  (en-prep payload)
+        en-core
+  ::
+  ++  en-network-message-payload
+    |=  msg=message:network
+    ^+  en-core
+    ?-  -.msg
+    ::
+        %version
+      =.  en-core  (en-prep 4 version.msg)
+      =.  en-core  (en-network-services services.msg)
+      =.  en-core  (en-prep 8 time.msg)
+      =.  en-core  (en-network-address-v1-partial receiver.msg)
+      =.  en-core  (en-network-address-v1-partial sender.msg)
+      =.  en-core  (en-prep 8 nonce.msg)
+      =/  txt-len  (met 3 user-agent.msg)
+      =.  en-core  (en-compactsize txt-len)
+      =.  en-core  (en-prep txt-len user-agent.msg)
+      =.  en-core  (en-prep 4 starting-height.msg)
+      =.  en-core  (en-prep 1 !relay.msg)
+          en-core
+    ::
+        %verack       en-core
+        %wtxidrelay   en-core
+        %sendaddrv2   en-core
+        %sendheaders  en-core
+    ::
+        %sendtxrcncl
+      =.  en-core  (en-prep 4 version.msg)
+      =.  en-core  (en-prep 8 remote-salt.msg)
+          en-core
+    ::
+        %sendcmpct
+      =.  en-core  (en-prep 1 !receiver-is-high-bandwidth.msg)
+      =.  en-core  (en-prep 8 version.msg)
+          en-core
+    ::
+        %addr
+      =.  en-core  (en-compactsize (lent addresses.msg))
+      |-
+      ?~  addresses.msg  en-core
+      =.  en-core  (en-network-address-v1 i.addresses.msg)
+      %=  $
+          addresses.msg  t.addresses.msg
+      ==
+    ::
+        %addrv2
+      =.  en-core  (en-compactsize (lent addresses.msg))
+      |-
+      ?~  addresses.msg  en-core
+      =.  en-core  (en-network-address-v2 i.addresses.msg)
+      %=  $
+          addresses.msg  t.addresses.msg
+      ==
+    ::
+        %ping      (en-prep 8 nonce.msg)
+        %pong      (en-prep 8 nonce.msg)
+        %inv       (en-network-inventory inventory.msg)
+        %getdata   (en-network-inventory inventory.msg)
+        %notfound  (en-network-inventory inventory.msg)
+    ::
+        %getblocks
+      =.  en-core  (en-network-block-locator block-locator.msg)
+      =.  en-core  (en-prep 32 ?^(hash-stop.msg u.hash-stop.msg 0x0))
+          en-core
+    ::
+        %getheaders
+      =.  en-core  (en-network-block-locator block-locator.msg)
+      =.  en-core  (en-prep 32 ?^(hash-stop.msg u.hash-stop.msg 0x0))
+          en-core
+    ::
+        %getblocktxn
+      =.  en-core  (en-prep 32 block-hash.msg)
+      =.  en-core  (en-compactsize (lent differential-indexes.msg))
+      |-
+      ?~  differential-indexes.msg  en-core
+      =.  en-core  (en-compactsize i.differential-indexes.msg)
+      %=  $
+          differential-indexes.msg  t.differential-indexes.msg
+      ==
+    ::
+        %getaddr  en-core
+        %mempool  en-core
+        %tx       (en-transaction transaction.msg)
+        %block    (en-block block.msg)
+    ::
+        %headers
+      =.  en-core  (en-compactsize (lent headers.msg))
+      |-
+      ?~  headers.msg  en-core
+      =.  en-core  (en-block-header i.headers.msg)
+      %=  $
+          headers.msg  t.headers.msg
+      ==
+    ::
+        %merkleblock  en-core  :: TODO: merkle block serialization
+    ::
     ==
   ::
   --
@@ -343,6 +547,57 @@
         hashes
         flags
     ==
+  ::
+  :: ++  de-network-message
+  ::   ?-  -.msg
+  ::   ::
+  ::       %version
+  ::   ::
+  ::       %verack
+  ::   ::
+  ::       %wtxidrelay
+  ::   ::
+  ::       %sendaddrv2
+  ::   ::
+  ::       %sendheaders
+  ::   ::
+  ::       %sendtxrcncl
+  ::   ::
+  ::       %sendcmpct
+  ::   ::
+  ::       %addr
+  ::   ::
+  ::       %addrv2
+  ::   ::
+  ::       %ping
+  ::   ::
+  ::       %pong
+  ::   ::
+  ::       %inv
+  ::   ::
+  ::       %getdata
+  ::   ::
+  ::       %notfound
+  ::   ::
+  ::       %getblocks
+  ::   ::
+  ::       %getheaders
+  ::   ::
+  ::       %getblocktxn
+  ::   ::
+  ::       %getaddr
+  ::   ::
+  ::       %mempool
+  ::   ::
+  ::       %tx
+  ::   ::
+  ::       %block
+  ::   ::
+  ::       %headers
+  ::   ::
+  ::       %merkleblock
+  ::   ::
+  ::   ==
   ::
   --
 ::

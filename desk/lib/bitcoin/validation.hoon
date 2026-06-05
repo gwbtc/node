@@ -145,7 +145,7 @@
     ?:  =(hed gen)
       :+  %.y
           0
-          (calc-new-chainwork (de-compact-target:b-ser bits.gen) 0)
+          (calc-new-chainwork (de-compact-target:b-ser bits.gen) 0x0)
     :-  %.n
     =/  hed-hash  (make-block-hash:b-ser hed)
     =/  gen-hash  (make-block-hash:b-ser gen)
@@ -159,7 +159,7 @@
     ==
   ::
   ++  calc-new-chainwork
-    |=  [tar=@ud wok=chainwork]
+    |=  [tar=@ux wok=chainwork]
     ^-  chainwork
     %+  add  wok
     %+  div

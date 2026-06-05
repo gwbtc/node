@@ -32,7 +32,7 @@
 +$  witness-stack        (list hexb)
 +$  transaction-witness  (list witness-stack)
 ::
-+$  chainwork  @ud
++$  chainwork  @ux
 ::
 +$  block-headers
   %+  map

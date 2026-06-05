@@ -3,14 +3,14 @@
     b-ser=bitcoin-serialization,
     b-http=bitcoin-core-http
 |%
-+$  candidate-chain-tips  (set block-hash)
++$  active-chain-tip  [=block-height =block-hash]
 +$  bh-index  ((mop block-height block-hash) lth)
 ::
 +$  core-http-config  $@(~ node-config:b-http)
 ::
 +$  state-0
   $:  =core-http-config
-      =candidate-chain-tips
+      =active-chain-tip
       =bh-index
       =block-headers
   ==
