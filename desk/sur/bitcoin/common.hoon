@@ -1,5 +1,4 @@
 |%
-::  little endian hex bytes
 +$  hexb  [wid=@ud dat=@ux]
 ::
 +$  block-height   @ud

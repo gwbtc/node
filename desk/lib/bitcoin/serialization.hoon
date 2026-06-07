@@ -45,7 +45,7 @@
   ++  en-core  .
   ++  en-abet  byt
   ++  en-prep
-    |=  [wid=@ dat=@]
+    |=  [wid=@ dat=@]  :: TODO: validate atom dat size is lte wid?
     %_  en-core
         wid.byt  (add wid.byt wid)
         dat.byt  (can 3 [byt wid^dat ~])
@@ -175,7 +175,7 @@
     ==
   ::
   ++  en-network-address-id
-    |=  nid=address-network-id:network
+    |=  nid=network-address-id:network
     %+  en-prep     1
     ?-  nid
         %ipv4       0x1
@@ -216,7 +216,7 @@
     =.  en-core  (en-prep 4 time.adr)
     =.  en-core  (en-compactsize dat:en-abet:(en-network-services:en services.adr))
     =.  en-core  (en-network-address-id id.adr)
-    =.  en-core  (en-prep address.adr)
+    =.  en-core  (en-prep (address-id-to-size:network-helpers id.adr) address.adr)
     =.  en-core  (en-prep 2 port.adr)
         en-core
   ::
@@ -233,29 +233,14 @@
   ::
   ++  en-network-inventory
     |=  inv=inventory:network
-    =/  witness-flag  msg-witness-flag:network
     =.  en-core  (en-compactsize (lent inv))
-    |^
+    |-
     ?~  inv  en-core
-    =.  en-core  (en-prep 4 (inv-type-to-num type.i.inv))
+    =.  en-core  (en-prep 4 (inv-type-to-num:network-helpers type.i.inv))
     =.  en-core  (en-prep 32 hash.i.inv)
     %=  $
         inv  t.inv
     ==
-    ++  inv-type-to-num
-      |=  typ=inventory-type:network
-      ^-  @ud
-      ?-  typ
-          %undefined           0
-          %msg-tx              1
-          %msg-block           2
-          %msg-wtx             5
-          %msg-filtered-block  3
-          %msg-cmpct-block     4
-          %msg-witness-block   (con (inv-type-to-num %msg-block) witness-flag)
-          %msg-witness-tx      (con (inv-type-to-num %msg-tx) witness-flag)
-      ==
-    --
   ::
   ++  en-network-message
     |=  [net=network:network msg=message:network]
@@ -263,7 +248,7 @@
     =.  en-core  (en-network-magic-bytes net)
     =.  en-core  (en-prep 12 -.msg)
     =.  en-core  (en-prep 4 wid.payload)
-    =.  en-core  (en-prep 4 (end [3 4] (shay 32 (shay payload))))
+    =.  en-core  (en-prep (make-message-checksum:network-helpers payload))
     =.  en-core  (en-prep payload)
         en-core
   ::
@@ -368,14 +353,21 @@
 :: +de
 ::   deserialization core
 ++  de
-  |_  dat=@ux
+  |_  byt=hexb
   ++  de-core  .
-  ++  de-abed  |=(leb=@ux de-core(dat leb))
-  ++  de-read  |=(wid=@ud [(end [3 wid] dat) de-core(dat (rsh [3 wid] dat))])
-  ++  de-peek  |=(wid=@ud (end [3 wid] dat))
+  ++  de-abet  byt
+  ++  de-abed  |=(leb=hexb de-core(byt leb))
+  ++  de-peek  |=(wid=@ud (end [3 wid] dat.byt))
+  ++  de-read
+    |=  wid=@ud
+    :-  (de-peek wid)
+    %_  de-core
+        wid.byt  ?:((lth wid wid.byt) (sub wid.byt wid) 0)
+        dat.byt  (rsh [3 wid] dat.byt)
+    ==
   ::
   ++  de-compactsize
-    ^-  [@ud _de-core]
+    ^-  [@ _de-core]
     =^  prefix  de-core  (de-read 1)
     ?:  (lte prefix 0xfc)  [prefix de-core]
     ?:  =(prefix 0xfd)  (de-read 2)
@@ -548,56 +540,469 @@
         flags
     ==
   ::
-  :: ++  de-network-message
-  ::   ?-  -.msg
-  ::   ::
-  ::       %version
-  ::   ::
-  ::       %verack
-  ::   ::
-  ::       %wtxidrelay
-  ::   ::
-  ::       %sendaddrv2
-  ::   ::
-  ::       %sendheaders
-  ::   ::
-  ::       %sendtxrcncl
-  ::   ::
-  ::       %sendcmpct
-  ::   ::
-  ::       %addr
-  ::   ::
-  ::       %addrv2
-  ::   ::
-  ::       %ping
-  ::   ::
-  ::       %pong
-  ::   ::
-  ::       %inv
-  ::   ::
-  ::       %getdata
-  ::   ::
-  ::       %notfound
-  ::   ::
-  ::       %getblocks
-  ::   ::
-  ::       %getheaders
-  ::   ::
-  ::       %getblocktxn
-  ::   ::
-  ::       %getaddr
-  ::   ::
-  ::       %mempool
-  ::   ::
-  ::       %tx
-  ::   ::
-  ::       %block
-  ::   ::
-  ::       %headers
-  ::   ::
-  ::       %merkleblock
-  ::   ::
-  ::   ==
+  ++  de-network-magic-bytes
+    ^-  [(unit network:network) _de-core]
+    =^  magic  de-core  (de-read 4)
+    :_  de-core
+    ?+  magic          ~
+        %0xd9b4.bef9   ~^%mainnet
+        %0xdab5.bffa   ~^%testnet
+        %0x709.110b    ~^%testnet3
+        %0x283f.161c   ~^%testnet4
+        %0x40cf.030a   ~^%signet
+    ==
+  ::
+  ++  de-network-address-id
+    ^-  [network-address-id:network _de-core]
+    =^  net-id  de-core  (de-read 1)
+    :_  de-core
+    ?+  net-id  !!
+        %0x1  %ipv4
+        %0x2  %ipv6
+        %0x3  %torv2
+        %0x4  %torv3
+        %0x5  %i2p
+        %0x6  %cjdns
+        %0x7  %yggdrasil
+    ==
+  ::
+  ++  de-network-services
+    ^-  [services:network _de-core]
+    =^  ser-bits  de-core  (de-read 8)
+    :_  de-core
+    %-  parse-service-bits:network-helpers
+        ser-bits
+  ::
+  ++  de-network-address-v1-partial
+    ^-  [address-v1-partial:network _de-core]
+    =^  services  de-core  de-network-services
+    =^  ip        de-core  (de-read 16)
+    =^  port      de-core  (de-read 2)
+    :_  de-core
+    :*  services
+        ip
+        port
+    ==
+  ::
+  ++  de-network-address-v1
+    ^-  [address-v1:network _de-core]
+    =^  time  de-core  (de-read 4)
+    =^  addr  de-core  de-network-address-v1-partial
+    :_  de-core
+    :*  time
+        addr
+    ==
+  ::
+  ++  de-network-address-v2
+    ^-  [address-v2:network _de-core]
+    =^  time      de-core  (de-read 4)
+    =^  ser-bits  de-core  de-compactsize
+    =^  addr-id   de-core  de-network-address-id
+    =^  address   de-core  (de-read (address-id-to-size:network-helpers addr-id))
+    =^  port      de-core  (de-read 2)
+    :_  de-core
+    :*  time
+        (parse-service-bits:network-helpers ser-bits)
+        addr-id
+        address
+        port
+    ==
+  ::
+  ++  de-network-block-locator
+    ^-  [block-locator:network _de-core]
+    =^  version  de-core  (de-read 4)
+    =^  count    de-core  de-compactsize
+    =^  locator  de-core
+      =/  haz  *(list block-hash)
+      |-
+      ?:  =(0 count)  [(flop haz) de-core]
+      =^  hiz  de-core  (de-read 32)
+      %=  $
+          count  (dec count)
+          haz    [hiz haz]
+      ==
+    :_  de-core
+    :*  version
+        locator
+    ==
+  ::
+  ++  de-network-inventory
+    ^-  [inventory:network _de-core]
+    =^  count  de-core  de-compactsize
+    =/  inv  *inventory:network
+    |-
+    ?:  =(0 count)  [(flop inv) de-core]
+    =^  inv-num  de-core  (de-read 4)
+    =^  hash     de-core  (de-read 32)
+    %=  $
+        count  (dec count)
+        inv    [[(inv-num-to-type:network-helpers inv-num) hash] inv]
+    ==
+  ::
+  ++  de-network-message-header
+    ^-  [network-message-header _de-core]
+    =^  network       de-core  de-network-magic-bytes:de-core
+    =^  command       de-core  (de-read 12)
+    =^  payload-size  de-core  (de-read 4)
+    =^  checksum      de-core  (de-read 4)
+    :_  de-core
+    :*  (need network)
+        command
+        payload-size
+        checksum
+    ==
+  ::
+  ++  de-network-message
+    ^-  [message:network _de-core]
+    =^  hed  de-core  de-network-message-header:de-core
+    =/  typ  (message-type:network command.hed)
+    ?-  typ
+    ::
+        %version
+      =^  version   de-core  (de-read 4)
+      =^  services  de-core  de-network-services
+      =^  time      de-core  (de-read 8)
+      =^  receiver  de-core  de-network-address-v1-partial
+      =^  sender    de-core  de-network-address-v1-partial
+      =^  nonce     de-core  (de-read 8)
+      =^  user-len  de-core  de-compactsize
+      =^  user      de-core  (de-read user-len)
+      =^  height    de-core  (de-read 4)
+      =^  relay     de-core  (de-read 1)
+      :_  de-core
+      :*  typ
+          version
+          services
+          time
+          receiver
+          sender
+          nonce
+          user
+          height
+          !(? relay)
+      ==
+    ::
+        %verack       [[typ ~] de-core]
+        %wtxidrelay   [[typ ~] de-core]
+        %sendaddrv2   [[typ ~] de-core]
+        %sendheaders  [[typ ~] de-core]
+    ::
+        %sendtxrcncl
+      =^  version   de-core  (de-read 4)
+      =^  salt      de-core  (de-read 8)
+      :_  de-core
+      :*  typ
+          version
+          salt
+      ==
+    ::
+        %sendcmpct
+      =^  is-hb    de-core  (de-read 1)
+      =^  version  de-core  (de-read 8)
+      :_  de-core
+      :*  typ
+          !(? is-hb)
+          version
+      ==
+    ::
+        %addr
+      =^  count  de-core  de-compactsize
+      =^  addrs  de-core
+        =/  ads  *(list address-v1:network)
+        |-
+        ?:  =(0 count)  [(flop ads) de-core]
+        =^  adr  de-core  de-network-address-v1
+        %=  $
+            count  (dec count)
+            ads    [adr ads]
+        ==
+      :_  de-core
+      :*  typ
+          addrs
+      ==
+    ::
+        %addrv2
+      =^  count  de-core  de-compactsize
+      =^  addrs  de-core
+        =/  ads  *(list address-v2:network)
+        |-
+        ?:  =(0 count)  [(flop ads) de-core]
+        =^  adr  de-core  de-network-address-v2
+        %=  $
+            count  (dec count)
+            ads    [adr ads]
+        ==
+      :_  de-core
+      :*  typ
+          addrs
+      ==
+    ::
+        %ping
+      =^  nonce  de-core  (de-read 8)
+      :_  de-core
+      :*  typ
+          nonce
+      ==
+    ::
+        %pong
+      =^  nonce  de-core  (de-read 8)
+      :_  de-core
+      :*  typ
+          nonce
+      ==
+    ::
+        %inv
+      =^  inv  de-core  de-network-inventory
+      :_  de-core
+      :*  typ
+          inv
+      ==
+    ::
+        %getdata
+      =^  inv  de-core  de-network-inventory
+      :_  de-core
+      :*  typ
+          inv
+      ==
+    ::
+        %notfound
+      =^  inv  de-core  de-network-inventory
+      :_  de-core
+      :*  typ
+          inv
+      ==
+    ::
+        %getblocks
+      =^  locator  de-core  de-network-block-locator
+      =^  hash     de-core  (de-read 32)
+      =/  stop     ?:(=(0 hash) ~ [~ hash])
+      :_  de-core
+      :*  typ
+          locator
+          stop
+      ==
+    ::
+        %getheaders
+      =^  locator  de-core  de-network-block-locator
+      =^  hash     de-core  (de-read 32)
+      =/  stop     ?:(=(0 hash) ~ [~ hash])
+      :_  de-core
+      :*  typ
+          locator
+          stop
+      ==
+    ::
+        %getblocktxn
+      =^  block-hash  de-core  (de-read 32)
+      =^  count       de-core  de-compactsize
+      =^  indexes  de-core
+        =/  ins  *(list @ud)
+        |-
+        ?:  =(0 count)  [(flop ins) de-core]
+        =^  ind  de-core  de-compactsize
+        %=  $
+            count  (dec count)
+            ins    [ind ins]
+        ==
+      :_  de-core
+      :*  typ
+          block-hash
+          indexes
+      ==
+    ::
+        %getaddr  [[typ ~] de-core]
+        %mempool  [[typ ~] de-core]
+    ::
+        %tx
+      =^  txn  de-core  de-transaction
+      :_  de-core
+      :*  typ
+          txn
+      ==
+    ::
+        %block
+      =^  block  de-core  de-block
+      :_  de-core
+      :*  typ
+          block
+      ==
+    ::
+        %headers
+      =^  count  de-core  de-compactsize
+      =^  headers  de-core
+        =/  hes  *(list block-header)
+        |-
+        ?:  =(0 count)  [(flop hes) de-core]
+        =^  hed  de-core  de-block-header
+        %=  $
+            count  (dec count)
+            hes    [hed hes]
+        ==
+      :_  de-core
+      :*  typ
+          headers
+      ==
+    ::
+        %merkleblock
+      =^  merkle-block  de-core  de-merkle-block
+      :_  de-core
+      :*  typ
+          merkle-block
+      ==
+    ::
+    ==
+  ::
+  --
+::
++$  network-message-header
+  $:  =network:network
+      command=@ux
+      payload-size=@ud
+      checksum=@ux
+  ==
+::
+++  network-params
+  |%
+  ++  network-message-header-size       24
+  ++  network-message-max-payload-size  33.554.432
+  ++  max-protocol-message-length       4.000.000
+  --
+::
+++  network-helpers
+  |%
+  ++  address-id-to-size
+    |=  nid=network-address-id:network
+    ^-  @ud
+    ?-  nid
+        %ipv4       4
+        %ipv6       16
+        %torv2      10
+        %torv3      32
+        %i2p        32
+        %cjdns      16
+        %yggdrasil  16
+    ==
+  ::
+  ++  parse-service-bits
+    |=  bis=@ux
+    %*  p
+        p=*services:network
+        node-network          !=(0 (dis (lsh [0 0] 1) bis))
+        node-bloom            !=(0 (dis (lsh [0 2] 1) bis))
+        node-witness          !=(0 (dis (lsh [0 3] 1) bis))
+        node-compact-filters  !=(0 (dis (lsh [0 6] 1) bis))
+        node-network-limited  !=(0 (dis (lsh [0 10] 1) bis))
+        node-p2p-v2           !=(0 (dis (lsh [0 11] 1) bis))
+    ==
+  ::
+  ++  inv-witness-flag  (lsh [0 30] 1)
+  ::
+  ++  inv-type-to-num
+    |=  typ=inventory-type:network
+    ^-  @ud
+    ?-  typ
+        %undefined           0
+        %msg-tx              1
+        %msg-block           2
+        %msg-wtx             5
+        %msg-filtered-block  3
+        %msg-cmpct-block     4
+        %msg-witness-block   (con (inv-type-to-num %msg-block) inv-witness-flag)
+        %msg-witness-tx      (con (inv-type-to-num %msg-tx) inv-witness-flag)
+    ==
+  ::
+  ++  inv-num-to-type
+    |=  num=@ud
+    ^-  inventory-type:network
+    ?:  =(0 num)  %undefined
+    ?:  =(1 num)  %msg-tx
+    ?:  =(2 num)  %msg-block
+    ?:  =(5 num)  %msg-wtx
+    ?:  =(3 num)  %msg-filtered-block
+    ?:  =(4 num)  %msg-cmpct-block
+    ?:  =((con (inv-type-to-num %msg-block) inv-witness-flag) num)  %msg-witness-block
+    ?:  =((con (inv-type-to-num %msg-tx) inv-witness-flag) num)     %msg-witness-tx
+    !!
+  ::
+  ++  make-message-checksum
+    |=  payload=hexb
+    ^-  hexb
+    :-  4
+    %+  end  [3 4]
+    %+  shay  32
+    %-  shay  payload
+  ::
+  --
+::
+++  network-socket-handler
+  |_  net=network:network
+  ::
+  ++  write
+    |=  messages=(list message:network)
+    ^-  hexb
+    =/  en-core  en
+    |-
+    ?~  messages  en-abet:en-core
+    =.  en-core  (en-network-message:en-core net i.messages)
+    %=  $
+        messages  t.messages
+    ==
+  ::
+  ++  read
+    |=  [new=hexb buffer=hexb]
+    ^-  (pair (list message:network) hexb)
+    =,  network-params
+    =/  messages  *(list message:network)
+    =/  de-core
+      %-  de-abed:de
+      :-  (add wid.buffer wid.new)
+          (can 3 [buffer new ~])
+    |^
+    ?:  (lth wid:de-abet:de-core network-message-header-size)
+      :-  (flop messages)
+          de-abet:de-core
+    =/  red  try-read
+    ?-  red
+    ::
+        %wait
+      :-  (flop messages)
+          de-abet:de-core
+    ::
+        %none
+      %=  $
+          de-core  +:(de-read:de-core 1)
+      ==
+    ::
+        %drop
+      =^  hed  de-core  de-network-message-header:de-core
+      %=  $
+          de-core  +:(de-read:de-core payload-size.hed)
+      ==
+    ::
+        %good
+      =^  message  de-core  de-network-message:de-core
+      %=  $
+          messages  [message messages]
+      ==
+    ::
+    ==
+    ++  try-read
+      ^-  ?(%none %wait %drop %good)
+      =/  bys  -:de-network-magic-bytes:de-core
+      ?~  bys  %none
+      =^  hed  de-core  de-network-message-header:de-core
+      ?:  (gth payload-size.hed network-message-max-payload-size)  %none
+      ?:  (lth wid:de-abet:de-core payload-size.hed)  %wait
+      =/  checksum
+        %-  make-message-checksum:network-helpers
+        :-  payload-size.hed
+        %-  de-peek:de-core
+            payload-size.hed
+      ?.  =(checksum checksum.hed)  %none
+      ?.  =(net network.hed)  %drop
+      ?~  ((soft message-type:network) command.hed)  %drop
+      %good
+    --
   ::
   --
 ::

@@ -1,16 +1,14 @@
 /-  *bitcoin-common
 /+  b-val=bitcoin-validation,
-    b-ser=bitcoin-serialization,
-    b-http=bitcoin-core-http
+    b-ser=bitcoin-serialization
 |%
 +$  active-chain-tip  [=block-height =block-hash]
 +$  bh-index  ((mop block-height block-hash) lth)
 ::
-+$  core-http-config  $@(~ node-config:b-http)
+:: +$  core-http-config  $@(~ node-config:b-http)
 ::
 +$  state-0
-  $:  =core-http-config
-      =active-chain-tip
+  $:  =active-chain-tip
       =bh-index
       =block-headers
   ==
@@ -35,23 +33,25 @@
   ^+  cor
   ?+  mak  ~|(bad-poke/mak !!) 
   ::
-      %download-headers
-    ?>  ?=(^ core-http-config)
-    =/  het  0
-    %-  emit
-    %:  make-request:json-rpc:b-http
-        /core-http/json-rpc/block-hash-batch/[(scot %ud het)]/[now-t]
-        core-http-config
-        [%get-block-hash-batch het 100]
-    ==
+      ~
+    cor
+  ::     %download-headers
+  ::   ?>  ?=(^ core-http-config)
+  ::   =/  het  0
+  ::   %-  emit
+  ::   %:  make-request:json-rpc:b-http
+  ::       /core-http/json-rpc/block-hash-batch/[(scot %ud het)]/[now-t]
+  ::       core-http-config
+  ::       [%get-block-hash-batch het 100]
+  ::   ==
   ::
-      %configure-core-http
-    =/  fig  !<(^core-http-config vaz)
-    %_  cor
-        core-http-config  fig
-    ==
+  ::    %configure-core-http
+  ::  =/  fig  !<(^core-http-config vaz)
+  ::  %_  cor
+  ::      core-http-config  fig
+  ::  ==
   ::
-  == 
+  ==
 ::
 ++  peek
   |=  poe=(pole @ta)
@@ -78,74 +78,76 @@
   ^+  cor
   ?+  wir  cor
   ::
-      [%core-http %json-rpc %block-hash-batch height=@t *]
-    =/  het  (slav %ud height.wir)
-    ?+  sin  cor
-    ::
-        [%iris %http-response %finished *]
-      =*  sus  status-code.response-header.client-response.sin
-      ?:  (gte sus 400)
-        ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
-        !!
-      =/  rus  (handle-response:json-rpc:b-http client-response.sin)
-      ?~  rus
-        ~&  >>>  'RPC response parsing failed'
-        !!
-      =*  res  u.rus
-      ?+  -.res  !!
-      ::
-          %get-block-hash-batch
-        ?>  ?=(^ core-http-config)
-        %-  emit
-        %:  make-request:json-rpc:b-http
-            /core-http/json-rpc/block-header-batch/[(scot %ud het)]/[now-t]
-            core-http-config
-            [%get-block-header-batch batch.res]
-        ==
-      ::
-      ==
-    ::
-    ==
-  ::
-      [%core-http %json-rpc %block-header-batch height=@t *]
-    =/  het  (slav %ud height.wir)
-    ?+  sin  cor
-    ::
-        [%iris %http-response %finished *]
-      =*  sus  status-code.response-header.client-response.sin
-      ?:  (gte sus 400)
-        ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
-        !!
-      =/  rus  (handle-response:json-rpc:b-http client-response.sin)
-      ?~  rus
-        ~&  >>>  'RPC response parsing failed'
-        !!
-      =*  res  u.rus
-      ?+  -.res  !!
-      ::
-          %get-block-header-batch
-        cor
-        ::=/  val
-        ::  %.  batch.res
-        ::  %~  validate-block-headers  he:b-val
-        ::  :-  now.bowl
-        ::      block-headers
-        ::?^  val
-        ::  ~&  >>>  ['header validation failed:' val]
-        ::  !!
-        ::=.  block-headers  (gas:on-block-headers block-headers batch.res)
-        ::=/  nex  (add het (lent batch.res))
-        ::?>  ?=(^ core-http-config)
-        ::%-  emit
-        ::%:  make-request:json-rpc:b-http
-        ::    /core-http/json-rpc/block-hash-batch/[(scot %ud nex)]/[now-t]
-        ::    core-http-config
-        ::    [%get-block-hash-batch nex 100]
-        ::==
-      ::
-      ==
-    ::
-    ==
+      ~
+    cor
+  ::     [%core-http %json-rpc %block-hash-batch height=@t *]
+  ::   =/  het  (slav %ud height.wir)
+  ::   ?+  sin  cor
+  ::   ::
+  ::       [%iris %http-response %finished *]
+  ::     =*  sus  status-code.response-header.client-response.sin
+  ::     ?:  (gte sus 400)
+  ::       ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
+  ::       !!
+  ::     =/  rus  (handle-response:json-rpc:b-http client-response.sin)
+  ::     ?~  rus
+  ::       ~&  >>>  'RPC response parsing failed'
+  ::       !!
+  ::     =*  res  u.rus
+  ::     ?+  -.res  !!
+  ::     ::
+  ::         %get-block-hash-batch
+  ::       ?>  ?=(^ core-http-config)
+  ::       %-  emit
+  ::       %:  make-request:json-rpc:b-http
+  ::           /core-http/json-rpc/block-header-batch/[(scot %ud het)]/[now-t]
+  ::           core-http-config
+  ::           [%get-block-header-batch batch.res]
+  ::       ==
+  ::     ::
+  ::     ==
+  ::   ::
+  ::   ==
+  :: ::
+  ::     [%core-http %json-rpc %block-header-batch height=@t *]
+  ::   =/  het  (slav %ud height.wir)
+  ::   ?+  sin  cor
+  ::   ::
+  ::       [%iris %http-response %finished *]
+  ::     =*  sus  status-code.response-header.client-response.sin
+  ::     ?:  (gte sus 400)
+  ::       ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
+  ::       !!
+  ::     =/  rus  (handle-response:json-rpc:b-http client-response.sin)
+  ::     ?~  rus
+  ::       ~&  >>>  'RPC response parsing failed'
+  ::       !!
+  ::     =*  res  u.rus
+  ::     ?+  -.res  !!
+  ::     ::
+  ::         %get-block-header-batch
+  ::       cor
+  ::       ::=/  val
+  ::       ::  %.  batch.res
+  ::       ::  %~  validate-block-headers  he:b-val
+  ::       ::  :-  now.bowl
+  ::       ::      block-headers
+  ::       ::?^  val
+  ::       ::  ~&  >>>  ['header validation failed:' val]
+  ::       ::  !!
+  ::       ::=.  block-headers  (gas:on-block-headers block-headers batch.res)
+  ::       ::=/  nex  (add het (lent batch.res))
+  ::       ::?>  ?=(^ core-http-config)
+  ::       ::%-  emit
+  ::       ::%:  make-request:json-rpc:b-http
+  ::       ::    /core-http/json-rpc/block-hash-batch/[(scot %ud nex)]/[now-t]
+  ::       ::    core-http-config
+  ::       ::    [%get-block-hash-batch nex 100]
+  ::       ::==
+  ::     ::
+  ::     ==
+  ::   ::
+  ::   ==
   ::
   ==
 ::

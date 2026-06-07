@@ -62,7 +62,6 @@
       hash=@ux
   ==
 ::
-++  msg-witness-flag  (lsh [0 30] 1)
 +$  inventory-type
   $?  %msg-tx
       %msg-block
@@ -75,7 +74,7 @@
       %undefined
   ==
 ::
-+$  address-network-id
++$  network-address-id
   $?  %ipv4
       %ipv6
       %torv2
@@ -99,8 +98,8 @@
 +$  address-v2
   $:  time=@ud
       =services
-      id=address-network-id
-      address=hexb
+      id=network-address-id
+      address=@ux
       port=@ud
   ==
 ::
