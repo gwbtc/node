@@ -9,8 +9,6 @@
       %signet
   ==
 ::
-+$  message-type  _-:*message
-::
 +$  message
   $%  [%version version-payload]
       [%verack ~]

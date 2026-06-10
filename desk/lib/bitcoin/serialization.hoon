@@ -653,10 +653,12 @@
     ==
   ::
   ++  de-network-message
-    ^-  [message:network _de-core]
+    ^-  [$@(~ [=network:network =message:network]) _de-core]
     =^  hed  de-core  de-network-message-header:de-core
-    =/  typ  (message-type:network command.hed)
-    ?-  typ
+    =*  nek  network.hed
+    =*  siz  payload-size.hed
+    =*  typ  command.hed
+    ?+  typ  ~^+:(de-read:de-core siz)
     ::
         %version
       =^  version   de-core  (de-read 4)
@@ -670,7 +672,8 @@
       =^  height    de-core  (de-read 4)
       =^  relay     de-core  (de-read 1)
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           version
           services
           time
@@ -682,16 +685,17 @@
           !(? relay)
       ==
     ::
-        %verack       [[typ ~] de-core]
-        %wtxidrelay   [[typ ~] de-core]
-        %sendaddrv2   [[typ ~] de-core]
-        %sendheaders  [[typ ~] de-core]
+        %verack       [[nek typ ~] de-core]
+        %wtxidrelay   [[nek typ ~] de-core]
+        %sendaddrv2   [[nek typ ~] de-core]
+        %sendheaders  [[nek typ ~] de-core]
     ::
         %sendtxrcncl
       =^  version   de-core  (de-read 4)
       =^  salt      de-core  (de-read 8)
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           version
           salt
       ==
@@ -700,7 +704,8 @@
       =^  is-hb    de-core  (de-read 1)
       =^  version  de-core  (de-read 8)
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           !(? is-hb)
           version
       ==
@@ -717,7 +722,8 @@
             ads    [adr ads]
         ==
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           addrs
       ==
     ::
@@ -733,42 +739,48 @@
             ads    [adr ads]
         ==
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           addrs
       ==
     ::
         %ping
       =^  nonce  de-core  (de-read 8)
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           nonce
       ==
     ::
         %pong
       =^  nonce  de-core  (de-read 8)
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           nonce
       ==
     ::
         %inv
       =^  inv  de-core  de-network-inventory
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           inv
       ==
     ::
         %getdata
       =^  inv  de-core  de-network-inventory
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           inv
       ==
     ::
         %notfound
       =^  inv  de-core  de-network-inventory
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           inv
       ==
     ::
@@ -777,7 +789,8 @@
       =^  hash     de-core  (de-read 32)
       =/  stop     ?:(=(0 hash) ~ [~ hash])
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           locator
           stop
       ==
@@ -787,7 +800,8 @@
       =^  hash     de-core  (de-read 32)
       =/  stop     ?:(=(0 hash) ~ [~ hash])
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           locator
           stop
       ==
@@ -805,25 +819,28 @@
             ins    [ind ins]
         ==
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           block-hash
           indexes
       ==
     ::
-        %getaddr  [[typ ~] de-core]
-        %mempool  [[typ ~] de-core]
+        %getaddr  [[nek typ ~] de-core]
+        %mempool  [[nek typ ~] de-core]
     ::
         %tx
       =^  txn  de-core  de-transaction
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           txn
       ==
     ::
         %block
       =^  block  de-core  de-block
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           block
       ==
     ::
@@ -839,14 +856,16 @@
             hes    [hed hes]
         ==
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           headers
       ==
     ::
         %merkleblock
       =^  merkle-block  de-core  de-merkle-block
       :_  de-core
-      :*  typ
+      :*  nek
+          typ
           merkle-block
       ==
     ::
@@ -856,7 +875,7 @@
 ::
 +$  network-message-header
   $:  =network:network
-      command=@ux
+      command=@t
       payload-size=@ud
       checksum=@ux
   ==
@@ -934,7 +953,9 @@
   ::
   --
 ::
-++  network-socket-handler
+:: +ne
+::   network socket handler core
+++  ne
   |_  net=network:network
   ::
   ++  write
@@ -950,7 +971,7 @@
   ::
   ++  read
     |=  [new=hexb buffer=hexb]
-    ^-  (pair (list message:network) hexb)
+    ^-  [(list message:network) hexb]
     =,  network-params
     =/  messages  *(list message:network)
     =/  de-core
@@ -961,8 +982,8 @@
     ?:  (lth wid:de-abet:de-core network-message-header-size)
       :-  (flop messages)
           de-abet:de-core
-    =/  red  try-read
-    ?-  red
+    =/  try  try-read
+    ?-  try
     ::
         %wait
       :-  (flop messages)
@@ -973,21 +994,17 @@
           de-core  +:(de-read:de-core 1)
       ==
     ::
-        %drop
-      =^  hed  de-core  de-network-message-header:de-core
-      %=  $
-          de-core  +:(de-read:de-core payload-size.hed)
-      ==
-    ::
         %good
-      =^  message  de-core  de-network-message:de-core
+      =^  mes  de-core  de-network-message:de-core
+      ?~  mes  $
+      ?.  =(net network.mes)  $
       %=  $
-          messages  [message messages]
+          messages  [message.mes messages]
       ==
     ::
     ==
     ++  try-read
-      ^-  ?(%none %wait %drop %good)
+      ^-  ?(%none %wait %good)
       =/  bys  -:de-network-magic-bytes:de-core
       ?~  bys  %none
       =^  hed  de-core  de-network-message-header:de-core
@@ -998,10 +1015,9 @@
         :-  payload-size.hed
         %-  de-peek:de-core
             payload-size.hed
-      ?.  =(checksum checksum.hed)  %none
-      ?.  =(net network.hed)  %drop
-      ?~  ((soft message-type:network) command.hed)  %drop
+      ?.  =(dat.checksum checksum.hed)  %none
       %good
+    ::
     --
   ::
   --
