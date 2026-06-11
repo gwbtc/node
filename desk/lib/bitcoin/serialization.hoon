@@ -16,6 +16,13 @@
   %-  shay
       en-abet:(en-legacy-transaction:en txn)
 ::
+++  make-wtxid
+  |=  txn=transaction
+  ^-  txid
+  %+  shay  32
+  %-  shay
+      en-abet:(en-transaction:en txn)
+::
 ++  de-compact-target
   |=  bis=@ux
   ^-  @ux
