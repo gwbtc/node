@@ -282,7 +282,7 @@
           en-core
     ::
         %sendcmpct
-      =.  en-core  (en-prep 1 !receiver-is-high-bandwidth.msg)
+      =.  en-core  (en-prep 1 !high-bandwidth-mode.msg)
       =.  en-core  (en-prep 8 version.msg)
           en-core
     ::
@@ -331,7 +331,6 @@
       ==
     ::
         %getaddr  en-core
-        %mempool  en-core
         %tx       (en-transaction transaction.msg)
         %block    (en-block block.msg)
     ::
@@ -344,7 +343,84 @@
           headers.msg  t.headers.msg
       ==
     ::
-        %merkleblock  en-core  :: TODO: merkle block serialization
+        %feefilter  (en-prep 8 amount.msg)
+    ::
+        %cmpctblock
+      =.  en-core  (en-block-header block-header.msg)
+      =.  en-core  (en-prep 8 nonce.msg)
+      =.  en-core  (en-compactsize (lent shortids.msg))
+      =.  en-core
+        |-
+        ?~  shortids.msg  en-core
+        =.  en-core  (en-prep 6 i.shortids.msg)
+        %=  $
+            shortids.msg  t.shortids.msg
+        ==
+      =.  en-core  (en-compactsize (lent prefilledtxn.msg))
+      |-
+      ?~  prefilledtxn.msg  en-core
+      =.  en-core  (en-compactsize differential-index.i.prefilledtxn.msg)
+      =.  en-core  (en-transaction transaction.i.prefilledtxn.msg)
+      %=  $
+          prefilledtxn.msg  t.prefilledtxn.msg
+      ==
+    ::
+        %blocktxn
+      =.  en-core  (en-prep 32 block-hash.msg)
+      =.  en-core  (en-compactsize (lent transactions.msg))
+      |-
+      ?~  transactions.msg  en-core
+      =.  en-core  (en-transaction i.transactions.msg)
+      %=  $
+          transactions.msg  t.transactions.msg
+      ==
+    ::
+        %getcfilters
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 4 start-height.msg)
+      =.  en-core  (en-prep 32 stop-hash.msg)
+          en-core
+    ::
+        %cfilter
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 32 block-hash.msg)
+      =.  en-core  (en-compactsize wid.filter.msg)
+      =.  en-core  (en-prep filter.msg)
+          en-core
+    ::
+        %getcfheaders
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 4 start-height.msg)
+      =.  en-core  (en-prep 32 stop-hash.msg)
+          en-core
+    ::
+        %cfheaders
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 32 stop-hash.msg)
+      =.  en-core  (en-prep 32 previous-filter-header.msg)
+      =.  en-core  (en-compactsize (lent filter-hashes.msg))
+      |-
+      ?~  filter-hashes.msg  en-core
+      =.  en-core  (en-prep 32 i.filter-hashes.msg)
+      %=  $
+          filter-hashes.msg  t.filter-hashes.msg
+      ==
+    ::
+        %getcfcheckpt
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 32 stop-hash.msg)
+          en-core
+    ::
+        %cfcheckpt
+      =.  en-core  (en-prep 1 filter-type.msg)
+      =.  en-core  (en-prep 32 stop-hash.msg)
+      =.  en-core  (en-compactsize (lent filter-headers.msg))
+      |-
+      ?~  filter-headers.msg  en-core
+      =.  en-core  (en-prep 32 i.filter-headers.msg)
+      %=  $
+          filter-headers.msg  t.filter-headers.msg
+      ==
     ::
     ==
   ::
@@ -701,12 +777,12 @@
       ==
     ::
         %sendcmpct
-      =^  is-hb    de-core  (de-read 1)
+      =^  hb-mode  de-core  (de-read 1)
       =^  version  de-core  (de-read 8)
       :_  de-core
       :*  nek
           typ
-          !(? is-hb)
+          !(? hb-mode)
           version
       ==
     ::
@@ -826,7 +902,6 @@
       ==
     ::
         %getaddr  [[nek typ ~] de-core]
-        %mempool  [[nek typ ~] de-core]
     ::
         %tx
       =^  txn  de-core  de-transaction
@@ -861,12 +936,155 @@
           headers
       ==
     ::
-        %merkleblock
-      =^  merkle-block  de-core  de-merkle-block
+        %feefilter
+      =^  amount  de-core  (de-read 8)
       :_  de-core
       :*  nek
           typ
-          merkle-block
+          amount
+      ==
+    ::
+        %cmpctblock
+      =^  header      de-core  de-block-header
+      =^  nonce       de-core  (de-read 8)
+      =^  n-shortids  de-core  de-compactsize
+      =^  shortids    de-core
+        =/  sis  *(list @ux)
+        |-
+        ?:  =(0 n-shortids)  [(flop sis) de-core]
+        =^  sid  de-core  (de-read 6)
+        %=  $
+            n-shortids  (dec n-shortids)
+            sis         [sid sis]
+        ==
+      =^  n-prefilledtxn  de-core  de-compactsize
+      =^  prefilledtxn    de-core
+        =/  pxs  *(list [@ud transaction])
+        |-
+        ?:  =(0 n-prefilledtxn)  [(flop pxs) de-core]
+        =^  dix  de-core  de-compactsize
+        =^  txn  de-core  de-transaction
+        %=  $
+            n-prefilledtxn  (dec n-prefilledtxn)
+            pxs             [[dix txn] pxs]
+        ==
+      :_  de-core
+      :*  nek
+          typ
+          header
+          nonce
+          shortids
+          prefilledtxn
+      ==
+    ::
+        %blocktxn
+      =^  block-hash  de-core  (de-read 32)
+      =^  n-txs       de-core  de-compactsize
+      =^  txs         de-core
+        =/  txs  *(list transaction)
+        |-
+        ?:  =(0 n-txs)  [(flop txs) de-core]
+        =^  txn  de-core  de-transaction
+        %=  $
+            n-txs  (dec n-txs)
+            txs    [txn txs]
+        ==
+      :_  de-core
+      :*  nek
+          typ
+          block-hash
+          txs
+      ==
+    ::
+        %getcfilters
+      =^  filter-type   de-core  (de-read 1)
+      =^  start-height  de-core  (de-read 4)
+      =^  stop-hash     de-core  (de-read 32)
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          start-height
+          stop-hash
+      ==
+    ::
+        %cfilter
+      =^  filter-type   de-core  (de-read 1)
+      =^  block-hash    de-core  (de-read 32)
+      =^  filter-size   de-core  de-compactsize
+      =^  filter        de-core  (de-read filter-size)
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          block-hash
+          [filter-size filter]
+      ==
+    ::
+        %getcfheaders
+      =^  filter-type   de-core  (de-read 1)
+      =^  start-height  de-core  (de-read 4)
+      =^  stop-hash     de-core  (de-read 32)
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          start-height
+          stop-hash
+      ==
+    ::
+        %cfheaders
+      =^  filter-type   de-core  (de-read 1)
+      =^  stop-hash     de-core  (de-read 32)
+      =^  prev-head     de-core  (de-read 32)
+      =^  n-hashes      de-core  de-compactsize
+      =^  hashes        de-core
+        =/  haz  *(list @ux)
+        |-
+        ?:  =(0 n-hashes)  [(flop haz) de-core]
+        =^  hiz  de-core  (de-read 32)
+        %=  $
+            n-hashes  (dec n-hashes)
+            haz       [hiz haz]
+        ==
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          stop-hash
+          prev-head
+          hashes
+      ==
+    ::
+        %getcfcheckpt
+      =^  filter-type   de-core  (de-read 1)
+      =^  stop-hash     de-core  (de-read 32)
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          stop-hash
+      ==
+    ::
+        %cfcheckpt
+      =^  filter-type   de-core  (de-read 1)
+      =^  stop-hash     de-core  (de-read 32)
+      =^  n-headers     de-core  de-compactsize
+      =^  headers       de-core
+        =/  hez  *(list @ux)
+        |-
+        ?:  =(0 n-headers)  [(flop hez) de-core]
+        =^  hiz  de-core  (de-read 32)
+        %=  $
+            n-headers  (dec n-headers)
+            hez        [hiz hez]
+        ==
+      :_  de-core
+      :*  nek
+          typ
+          filter-type
+          stop-hash
+          headers
       ==
     ::
     ==

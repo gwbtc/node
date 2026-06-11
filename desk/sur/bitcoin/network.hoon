@@ -16,7 +16,7 @@
       [%sendaddrv2 ~]
       [%sendheaders ~]
       [%sendtxrcncl version=@ud remote-salt=@ux]
-      [%sendcmpct receiver-is-high-bandwidth=? version=@ud]
+      [%sendcmpct high-bandwidth-mode=? version=@ud]
       [%addr addresses=(list address-v1)]
       [%addrv2 addresses=(list address-v2)]
       [%ping nonce=@ux]
@@ -28,25 +28,38 @@
       [%getheaders =block-locator hash-stop=(unit block-hash)]
       [%getblocktxn =block-hash differential-indexes=(list @ud)]
       [%getaddr ~]
-      [%mempool ~]
       [%tx =transaction]
       [%block =block]
       [%headers headers=(list block-header)]
-      [%merkleblock =merkle-block]
-
-      :: TODO:
+      [%feefilter amount=@ud]
+      [%cmpctblock compact-block]
+      [%blocktxn =block-hash transactions=(list transaction)]
+      [%getcfilters filter-type=@ud start-height=block-height stop-hash=block-hash]
+      [%cfilter filter-type=@ud =block-hash filter=hexb]
+      [%getcfheaders filter-type=@ud start-height=block-height stop-hash=block-hash]
+      [%cfheaders filter-type=@ud stop-hash=block-hash previous-filter-header=@ux filter-hashes=(list @ux)]
+      [%getcfcheckpt filter-type=@ud stop-hash=block-hash]
+      [%cfcheckpt filter-type=@ud stop-hash=block-hash filter-headers=(list @ux)]
+      ::
+      :: not implemented:
+      ::
+      :: [%mempool]
+      :: [%merkleblock]
       :: [%filterload]
       :: [%filteradd]
       :: [%filterclear]
-      :: [%feefilter]
-      :: [%cmpctblock]
-      :: [%blocktxn]
-      :: [%getcfilters]
-      :: [%cfilter]
-      :: [%getcfheaders]
-      :: [%cfheaders]
-      :: [%getcfcheckpt]
-      :: [%cfcheckpt]
+  ==
+::
++$  prefilled-transaction
+  $:  differential-index=@ud
+      =transaction
+  ==
+::
++$  compact-block
+  $:  =block-header
+      nonce=@ud
+      shortids=(list @ux)
+      prefilledtxn=(list prefilled-transaction)
   ==
 ::
 +$  block-locator
@@ -114,12 +127,12 @@
   ==
 ::
 +$  services
-  $:  node-network=?
-      node-bloom=?
-      node-witness=?
-      node-compact-filters=?
-      node-network-limited=?
-      node-p2p-v2=?
+  $:  node-network=_|
+      node-bloom=_|
+      node-witness=_|
+      node-compact-filters=_|
+      node-network-limited=_|
+      node-p2p-v2=_|
   ==
 ::
 --

@@ -180,18 +180,17 @@
         %receive
       ~&  >  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser %mainnet) data.gif buffer.erd)
+      =.  last-connected.erd  now.bowl
+      =.  earth-peers  (~(put by earth-peers) erp erd)
       ~&  mes
       |-
-      ?~  mes
-        =.  last-connected.erd  now.bowl
-        %_  cor
-            earth-peers  (~(put by earth-peers) erp erd)
-        ==
+      ?~  mes  cor
       =.  cor
         ?+  -.i.mes  cor
         ::
             %version
           =.  services.erd  services.i.mes
+          =.  earth-peers  (~(put by earth-peers) erp erd)
           =/  dat  (~(write ne:b-ser %mainnet) [%verack ~] ~)
           %-  emit  (tcp-send erp dat)
         ::
