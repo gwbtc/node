@@ -1,12 +1,13 @@
 /-  *bitcoin-common
 |%
++$  protocol-version  _70.016
 ::
 +$  network
-  $?  %mainnet
-      %testnet
+  $?  %testnet
       %testnet3
       %testnet4
       %signet
+      %mainnet
   ==
 ::
 +$  message
@@ -123,7 +124,7 @@
       nonce=@ud
       user-agent=@t
       starting-height=@ud
-      relay=?
+      relay=_|
   ==
 ::
 +$  services

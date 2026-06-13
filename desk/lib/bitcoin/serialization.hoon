@@ -346,6 +346,7 @@
       |-
       ?~  headers.msg  en-core
       =.  en-core  (en-block-header i.headers.msg)
+      =.  en-core  (en-prep 1 0x0)
       %=  $
           headers.msg  t.headers.msg
       ==
@@ -933,6 +934,7 @@
         |-
         ?:  =(0 count)  [(flop hes) de-core]
         =^  hed  de-core  de-block-header
+        =^  nul  de-core  (de-read 1)
         %=  $
             count  (dec count)
             hes    [hed hes]

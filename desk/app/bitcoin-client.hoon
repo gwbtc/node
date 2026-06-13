@@ -15,12 +15,14 @@
   ==
 +$  earth-peers  (map earth-peer earth-peer-state)
 ::
-+$  active-chain-tip  [=block-height =block-hash]
++$  best-block  [=block-hash =block-height =chainwork]
 +$  bh-index  ((mop block-height block-hash) lth)
 ::
 +$  state-0
-  $:  =earth-peers
-      =active-chain-tip
+  $:  =protocol-version:b-net
+      =network:b-net
+      =earth-peers
+      =best-block
       =bh-index
       =block-headers
   ==
@@ -44,6 +46,20 @@
   |=  [mak=mark vaz=vase]
   ^+  cor
   ?+  mak  ~|(bad-poke/mak !!) 
+  ::
+      %log-block-headers-info
+    ~&  >>  [%best-block best-block]
+    ~&  >>  [%bh-index ~(wyt in bh-index)]
+    ~&  >>  [%headers ~(wyt in block-headers)]
+    cor
+  ::
+      %log-block-header
+    =/  het  !<(block-height vaz)
+    =/  haz  (got:on-bh-index bh-index het)
+    =/  hed  (~(got by block-headers) haz)
+    ~&  >  haz
+    ~&  >  hed
+    cor
   ::
       %open-tcp
     =/  erp  !<(earth-peer vaz)
@@ -93,74 +109,6 @@
   ::
       ~
     cor
-  ::     [%core-http %json-rpc %block-hash-batch height=@t *]
-  ::   =/  het  (slav %ud height.wir)
-  ::   ?+  sin  cor
-  ::   ::
-  ::       [%iris %http-response %finished *]
-  ::     =*  sus  status-code.response-header.client-response.sin
-  ::     ?:  (gte sus 400)
-  ::       ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
-  ::       !!
-  ::     =/  rus  (handle-response:json-rpc:b-http client-response.sin)
-  ::     ?~  rus
-  ::       ~&  >>>  'RPC response parsing failed'
-  ::       !!
-  ::     =*  res  u.rus
-  ::     ?+  -.res  !!
-  ::     ::
-  ::         %get-block-hash-batch
-  ::       ?>  ?=(^ core-http-config)
-  ::       %-  emit
-  ::       %:  make-request:json-rpc:b-http
-  ::           /core-http/json-rpc/block-header-batch/[(scot %ud het)]/[now-t]
-  ::           core-http-config
-  ::           [%get-block-header-batch batch.res]
-  ::       ==
-  ::     ::
-  ::     ==
-  ::   ::
-  ::   ==
-  :: ::
-  ::     [%core-http %json-rpc %block-header-batch height=@t *]
-  ::   =/  het  (slav %ud height.wir)
-  ::   ?+  sin  cor
-  ::   ::
-  ::       [%iris %http-response %finished *]
-  ::     =*  sus  status-code.response-header.client-response.sin
-  ::     ?:  (gte sus 400)
-  ::       ~&  >>>  `@t`(cat 3 'RPC request failed: ' (scot %ud sus))
-  ::       !!
-  ::     =/  rus  (handle-response:json-rpc:b-http client-response.sin)
-  ::     ?~  rus
-  ::       ~&  >>>  'RPC response parsing failed'
-  ::       !!
-  ::     =*  res  u.rus
-  ::     ?+  -.res  !!
-  ::     ::
-  ::         %get-block-header-batch
-  ::       cor
-  ::       ::=/  val
-  ::       ::  %.  batch.res
-  ::       ::  %~  validate-block-headers  he:b-val
-  ::       ::  :-  now.bowl
-  ::       ::      block-headers
-  ::       ::?^  val
-  ::       ::  ~&  >>>  ['header validation failed:' val]
-  ::       ::  !!
-  ::       ::=.  block-headers  (gas:on-block-headers block-headers batch.res)
-  ::       ::=/  nex  (add het (lent batch.res))
-  ::       ::?>  ?=(^ core-http-config)
-  ::       ::%-  emit
-  ::       ::%:  make-request:json-rpc:b-http
-  ::       ::    /core-http/json-rpc/block-hash-batch/[(scot %ud nex)]/[now-t]
-  ::       ::    core-http-config
-  ::       ::    [%get-block-hash-batch nex 100]
-  ::       ::==
-  ::     ::
-  ::     ==
-  ::   ::
-  ::   ==
   ::
   ==
 ::
@@ -173,32 +121,18 @@
     ?.  ?=(%fact -.sin)  cor
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(got by earth-peers) erp)
-    ~&  >  [%peer erp erd]
     =/  gif  !<(tcp-gift q.cage.sin)
     ?-  -.gif
     ::
         %receive
       ~&  >  %tcp-receive
-      =^  mes  buffer.erd  (~(read ne:b-ser %mainnet) data.gif buffer.erd)
+      =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =.  last-connected.erd  now.bowl
       =.  earth-peers  (~(put by earth-peers) erp erd)
-      ~&  mes
       |-
       ?~  mes  cor
-      =.  cor
-        ?+  -.i.mes  cor
-        ::
-            %version
-          =.  services.erd  services.i.mes
-          =.  earth-peers  (~(put by earth-peers) erp erd)
-          =/  dat  (~(write ne:b-ser %mainnet) [%verack ~] ~)
-          %-  emit  (tcp-send erp dat)
-        ::
-            %ping
-          =/  dat  (~(write ne:b-ser %mainnet) [%pong nonce.i.mes] ~)
-          %-  emit  (tcp-send erp dat)
-        ::
-        ==
+      ~&  -.i.mes
+      =.  cor  (handle-message [erp erd] i.mes)
       %=  $
           mes  t.mes
       ==
@@ -224,6 +158,30 @@
 ++  now-t  (scot %da now.bowl)
 ::
 ++  on-bh-index  ((on block-height block-hash) lth)
+::
+++  params
+  |%
+  ++  max-block-locator-size  101
+  --
+::
+++  make-block-locator
+  ^-  block-locator:b-net
+  :-  protocol-version
+  =/  het  block-height.best-block
+  =/  len  0
+  =/  les  1
+  |-
+  ^-  (list block-hash)
+  ?:  =(len max-block-locator-size:params)  ~
+  =/  haz  (get:on-bh-index bh-index het)
+  ?~  haz  ~
+  :-  u.haz
+  =.  len  +(len)
+  ?:  =(0 het)  ~
+  =?  les  (gte 10 len)  (mul 2 les)
+  %=  $
+      het  ?:((lth les het) (sub het les) 0)
+  ==
 ::
 ++  en-earth-peer-path
   |=  erp=earth-peer
@@ -263,7 +221,7 @@
   ?>  ?=(%ipv4 net-id.erp)
   =/  paf  (en-earth-peer-path erp)
   =/  sid  (weld /tcp paf)
-  =/  dat  (~(write ne:b-ser %mainnet) make-version-message ~)
+  =/  dat  (~(write ne:b-ser network) make-connect-messages)
   :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp]])]
       [%pass sid %agent [our.bowl %tcp] %watch sid]
       (tcp-send erp dat)
@@ -285,21 +243,110 @@
   =/  sid  (weld /tcp paf)
   [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%send sid dat])]
 ::
-++  make-version-message
-  ^-  message:b-net
+++  make-connect-messages
+  ^-  (list message:b-net)
+  =-  [- [%sendheaders ~] [%sendaddrv2 ~] ~]
   :-  %version
   =/  ver  *version-payload:b-net
   %_  ver
-      version     70.016
+      version     protocol-version
       time        (div (sub now.bowl ~1970.1.1) ~s1)
-      user-agent  'tcp-test'
+      user-agent  'urbit'
+  ==
+::
+++  handle-message
+  |=  [[erp=earth-peer erd=earth-peer-state] msg=message:b-net]
+  ^+  cor
+  ?+  -.msg  cor
+  ::
+      %version
+    =.  services.erd  services.msg
+    =.  earth-peers  (~(put by earth-peers) erp erd)
+    =/  mes
+      :~  [%verack ~]
+          [%getheaders make-block-locator ~]
+      ==
+    %-  emit
+    %+  tcp-send
+        erp
+        (~(write ne:b-ser network) mes)
+  ::
+      %ping
+    =/  mes
+      :~  [%pong nonce.msg]
+      ==
+    %-  emit
+    %+  tcp-send
+        erp
+        (~(write ne:b-ser network) mes)
+  ::
+      %addrv2
+    ~&  >>  [%addresses (lent addresses.msg)]
+    cor
+  ::
+      %inv
+    ~&  >>  [%inv type:(rear inventory.msg)]
+    cor
+  ::
+      %headers
+    ~&  >>>  [%headers (lent headers.msg)]
+    |-
+    ?~  headers.msg  cor
+    =*  hed  i.headers.msg
+    =/  val  (~(validate-block-header he:b-val now.bowl block-headers) hed)
+    ?-  -.val
+    ::
+        %redundant
+      ~&  [%redundant-block-header block-hash.val]
+      %=  $
+          headers.msg  t.headers.msg
+      ==
+    ::
+        %orphan
+      ~&  [%orphan-block-header block-hash.val hed]
+      cor
+    ::
+        %invalid
+      ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
+      cor
+    ::
+        %valid
+      =*  haz  block-hash.val
+      =*  het  block-height.val
+      =*  wok  chainwork.val
+      =/  is-new-best-block  (gth wok chainwork.best-block)
+      =/  is-extending-active  =(block-hash.best-block previous-block-hash.hed)
+      =/  is-reorg  &(is-new-best-block !is-extending-active)
+      ?:  is-reorg
+        ~&  >>>  [%reorg haz het hed]
+        !!
+      =?  best-block  is-new-best-block  [haz het wok]
+      =?  bh-index    is-new-best-block  (put:on-bh-index bh-index het haz)
+      %=  $
+          headers.msg    t.headers.msg
+          block-headers  (~(put by block-headers) haz het wok hed)
+      ==
+    ::
+    ==
+  ::
   ==
 ::
   ::
 ::
 ++  init
   ^+  cor
-  cor
+  =/  gen  genesis-block-header:b-val
+  =/  val  (~(validate-block-header he:b-val now.bowl block-headers) gen)
+  ?>  ?=(%valid -.val)
+  =*  haz  block-hash.val
+  =*  het  block-height.val
+  =*  wok  chainwork.val
+  %_  cor
+      network        %mainnet
+      best-block     [haz het wok]
+      bh-index       (put:on-bh-index bh-index het haz)
+      block-headers  (~(put by block-headers) haz het wok gen)
+  ==
 ::
 ++  save
   ^-  vase
@@ -312,7 +359,7 @@
     =/  old  (mole |.(!<(state-n vaz)))
     ?~  old
       ~&  >>>  [dap.bowl %load-state-reset]
-      cor
+      init
     ?-  -.u.old
       %0  cor(state u.old)
     ==

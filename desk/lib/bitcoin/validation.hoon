@@ -30,27 +30,18 @@
   |_  [now=time hes=block-headers]
   ::
   +$  validation-result
-    $%  [%.y =block-height =chainwork]
-        [%.n validation-checks]
+    $%  [%valid =block-hash =block-height =chainwork]
+        [%invalid =block-hash =validation-checks]
+        [%redundant =block-hash]
+        [%orphan =block-hash]
     ==
   +$  validation-checks
-    $:  valid-prev-hash=?
-        valid-work-required=?
-        valid-time-lower-bound=?
-        valid-time-upper-bound=?
-        valid-pow=?
+    $:  valid-prev-hash=_|
+        valid-work-required=_|
+        valid-time-lower-bound=_|
+        valid-time-upper-bound=_|
+        valid-pow=_|
     ==
-  ::
-  :: ++  validate-block-headers
-  ::   |=  mor=(list block-header)
-  ::   ^-  validation-result
-  ::   ?~  mor  %.y
-  ::   =/  res  (validate-block-header i.mor)
-  ::   ?^  res  res
-  ::   %=  $
-  ::     mor  t.mor
-  ::     hes  (put:on-block-headers hes i.mor)
-  ::   ==
   ::
   ++  validate-block-header
     |=  hed=block-header
@@ -59,11 +50,18 @@
     ?:  =(0x0 previous-block-hash.hed)
       %-  validate-genesis-block-header
           hed
-    =/  prev       (~(got by hes) previous-block-hash.hed)
     =/  this-hash  (make-block-hash:b-ser hed)
-    =/  prev-hash  (make-block-hash:b-ser block-header.prev)
-    =/  het        +(block-height.prev)
+    ?:  (~(has by hes) this-hash)
+      :-  %redundant
+          this-hash
+    =/  previous  (~(get by hes) previous-block-hash.hed)
+    ?~  previous
+      :-  %orphan
+          this-hash
+    =*  pre  u.previous
+    =/  het  +(block-height.pre)
     |^
+    =/  prev-hash           (make-block-hash:b-ser block-header.pre)
     =/  block-time          (from-unix:chrono:userlib time.hed)
     =/  median-time-past    get-median-time-past
     =/  target              (de-compact-target:b-ser bits.hed)
@@ -83,10 +81,12 @@
             valid-time-upper-bound.val
             valid-pow.val
         ==
-      :+  %.y
+      :^  %valid
+          this-hash
           het
-          (calc-new-chainwork target chainwork.prev)
-    :-  %.n
+          (calc-new-chainwork target chainwork.pre)
+    :+  %invalid
+        this-hash
         val
     ::
     ++  get-median-time-past
@@ -110,7 +110,7 @@
     ::
     ++  get-next-work-required
       ^-  @ux
-      ?.  =(0 (mod het difficulty-adjustment-interval))  bits.block-header.prev
+      ?.  =(0 (mod het difficulty-adjustment-interval))  bits.block-header.pre
       =/  epoch-first
         ^-  block-header
         =/  num  difficulty-adjustment-interval
@@ -124,11 +124,11 @@
         ==
       =/  actual-timespan
         %+  sub
-        %-  from-unix:chrono:userlib  time.block-header.prev
+        %-  from-unix:chrono:userlib  time.block-header.pre
         %-  from-unix:chrono:userlib  time.epoch-first
       =.  actual-timespan  (max actual-timespan (div pow-target-timespan 4))
       =.  actual-timespan  (min actual-timespan (mul pow-target-timespan 4))
-      =/  previous-target  (de-compact-target:b-ser bits.block-header.prev)
+      =/  previous-target  (de-compact-target:b-ser bits.block-header.pre)
       =/  next-target
         %+  min
             pow-limit
@@ -141,14 +141,19 @@
   ++  validate-genesis-block-header
     |=  hed=block-header
     ^-  validation-result
-    =/  gen  genesis-block-header
-    ?:  =(hed gen)
-      :+  %.y
-          0
-          (calc-new-chainwork (de-compact-target:b-ser bits.gen) 0x0)
-    :-  %.n
-    =/  hed-hash  (make-block-hash:b-ser hed)
+    =/  gen       genesis-block-header
     =/  gen-hash  (make-block-hash:b-ser gen)
+    =/  hed-hash  (make-block-hash:b-ser hed)
+    ?:  (~(has by hes) hed-hash)
+      :-  %redundant
+          hed-hash
+    ?:  =(hed gen)
+      :^  %valid
+          hed-hash
+          0
+          (calc-new-chainwork (de-compact-target:b-ser bits.hed) 0x0)
+    :+  %invalid
+        hed-hash
     %*  p
         p=*validation-checks
         valid-prev-hash         =(previous-block-hash.hed previous-block-hash.gen)
