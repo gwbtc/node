@@ -70,7 +70,7 @@
       ~&  >>>  [%need-ipv4 erp]
       !!
     =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
-    %-  emil  (tcp-open erp)
+    %-  emil  (open:tcp erp)
   ::
       %close-tcp
     ?.  .?(earth-peers)
@@ -78,7 +78,7 @@
       !!
     =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
     =.  earth-peers  ~
-    %-  emil  (tcp-close erp)
+    %-  emil  (close:tcp erp)
   ::
   ==
 ::
@@ -121,7 +121,7 @@
     ?.  ?=(%fact -.sin)  cor
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(got by earth-peers) erp)
-    =/  gif  !<(tcp-gift q.cage.sin)
+    =/  gif  !<(gift:tcp q.cage.sin)
     ?-  -.gif
     ::
         %receive
@@ -197,52 +197,6 @@
       (slav %ud i.t.t.paf)
   ==
 ::
-+$  tcp-fief
-  $%  [%turf p=(list turf) q=@ud]
-      [%if p=@if q=@ud]
-      [%is p=@is q=@ud]
-  ==
-+$  tcp-target  [secure=? =tcp-fief]
-+$  tcp-task
-  $%  [%connect =wire =tcp-target]
-      [%send =wire data=octs]
-      [%close =wire]
-  ==
-+$  tcp-gift
-  $%  [%connected =wire]
-      [%receive =wire data=octs]
-      [%closed =wire]
-      [%error =wire msg=@t]
-  ==
-::
-++  tcp-open
-  |=  erp=earth-peer
-  ^-  (list card)
-  ?>  ?=(%ipv4 net-id.erp)
-  =/  paf  (en-earth-peer-path erp)
-  =/  sid  (weld /tcp paf)
-  =/  dat  (~(write ne:b-ser network) make-connect-messages)
-  :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp]])]
-      [%pass sid %agent [our.bowl %tcp] %watch sid]
-      (tcp-send erp dat)
-  ==
-::
-++  tcp-close
-  |=  erp=earth-peer
-  ^-  (list card)
-  =/  paf  (en-earth-peer-path erp)
-  =/  sid  (weld /tcp paf)
-  :~  [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%close sid])]
-      [%pass (weld /tcp/watch paf) %agent [our.bowl %tcp] %leave ~]
-  ==
-::
-++  tcp-send
-  |=  [erp=earth-peer dat=octs]
-  ^-  card
-  =/  paf  (en-earth-peer-path erp)
-  =/  sid  (weld /tcp paf)
-  [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%send sid dat])]
-::
 ++  make-connect-messages
   ^-  (list message:b-net)
   =-  [- [%sendheaders ~] [%sendaddrv2 ~] ~]
@@ -267,7 +221,7 @@
           [%getheaders make-block-locator ~]
       ==
     %-  emit
-    %+  tcp-send
+    %+  send:tcp
         erp
         (~(write ne:b-ser network) mes)
   ::
@@ -276,7 +230,7 @@
       :~  [%pong nonce.msg]
       ==
     %-  emit
-    %+  tcp-send
+    %+  send:tcp
         erp
         (~(write ne:b-ser network) mes)
   ::
@@ -330,6 +284,57 @@
     ==
   ::
   ==
+::
+++  tcp
+  |%
+  +$  fief
+    $%  [%turf p=(list turf) q=@ud]
+        [%if p=@if q=@ud]
+        [%is p=@is q=@ud]
+    ==
+  +$  target  [secure=? =fief]
+  +$  task
+    $%  [%connect =wire =target]
+        [%send =wire data=octs]
+        [%close =wire]
+    ==
+  +$  gift
+    $%  [%connected =wire]
+        [%receive =wire data=octs]
+        [%closed =wire]
+        [%error =wire msg=@t]
+    ==
+  ::
+  ++  open
+    |=  erp=earth-peer
+    ^-  (list card)
+    ?>  ?=(%ipv4 net-id.erp)
+    =/  paf  (en-earth-peer-path erp)
+    =/  sid  (weld /tcp paf)
+    =/  dat  (~(write ne:b-ser network) make-connect-messages)
+    :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp]])]
+        [%pass sid %agent [our.bowl %tcp] %watch sid]
+        (send erp dat)
+    ==
+  ::
+  ++  close
+    |=  erp=earth-peer
+    ^-  (list card)
+    =/  paf  (en-earth-peer-path erp)
+    =/  sid  (weld /tcp paf)
+    :~  [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%close sid])]
+        [%pass (weld /tcp/watch paf) %agent [our.bowl %tcp] %leave ~]
+    ==
+  ::
+  ++  send
+    |=  [erp=earth-peer dat=octs]
+    ^-  card
+    =/  paf  (en-earth-peer-path erp)
+    =/  sid  (weld /tcp paf)
+    [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%send sid dat])]
+  ::
+  --
+::
 ::
   ::
 ::
