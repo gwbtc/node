@@ -268,17 +268,67 @@
       =*  haz  block-hash.val
       =*  het  block-height.val
       =*  wok  chainwork.val
+      =.  block-headers
+        %+  ~(put by block-headers)
+            haz
+            [het wok hed]
       =/  is-new-best-block  (gth wok chainwork.best-block)
-      =/  is-extending-active  =(block-hash.best-block previous-block-hash.hed)
-      =/  is-reorg  &(is-new-best-block !is-extending-active)
-      ?:  is-reorg
-        ~&  >>>  [%reorg haz het hed]
-        !!
-      =?  best-block  is-new-best-block  [haz het wok]
-      =?  bh-index    is-new-best-block  (put:on-bh-index bh-index het haz)
+      =/  is-extending-best  =(block-hash.best-block previous-block-hash.hed)
+      =/  is-reorg  &(is-new-best-block !is-extending-best)
+      ?.  is-reorg
+        =?  best-block  is-new-best-block  [haz het wok]
+        =?  bh-index    is-extending-best  (put:on-bh-index bh-index het haz)
+        %=  $
+            headers.msg  t.headers.msg
+        ==
+      :: reorg case
+      :: - roll back bh-index to the last common block,
+      ::   and graft on the new best branch.
+      :: - TODO: update affected subscriptions
+      =/  new-best-block  `^best-block`[haz het wok]
+      =/  new-best-branch
+        ^-  ^bh-index
+        =/  new-set
+          %-  ~(gas in *(set [block-height block-hash]))
+          :~  [block-height.new-best-block block-hash.new-best-block]
+          ==
+        =/  old-set
+          %-  ~(gas in *(set [block-height block-hash]))
+          :~  [block-height.best-block block-hash.best-block]
+          ==
+        =/  new-hash  previous-block-hash.hed
+        =/  old-hash
+          =<  previous-block-hash.block-header
+              (~(got by block-headers) block-hash.best-block)
+        |-
+        =/  int  (~(int in old-set) new-set)
+        ?^  int
+          =/  new-branch  (gas:on-bh-index *^bh-index ~(tap in new-set))
+          %^  lot:on-bh-index
+              new-branch
+              [~ -.n.int]
+              ~
+        =/  new-head  (~(got by block-headers) new-hash)
+        =/  old-head  (~(got by block-headers) old-hash)
+        %=  $
+            new-set   (~(put in new-set) block-height.new-head new-hash)
+            old-set   (~(put in old-set) block-height.old-head old-hash)
+            new-hash  previous-block-hash.block-header.new-head
+            old-hash  previous-block-hash.block-header.old-head
+        ==
+      =.  best-block  new-best-block
+      =.  bh-index
+        %^  lot:on-bh-index  bh-index  ~
+        :-  ~
+        =<  key.head
+        %-  pop:on-bh-index
+            new-best-branch
+      =.  bh-index
+        %+  uni:on-bh-index
+            bh-index
+            new-best-branch
       %=  $
-          headers.msg    t.headers.msg
-          block-headers  (~(put by block-headers) haz het wok hed)
+          headers.msg  t.headers.msg
       ==
     ::
     ==
