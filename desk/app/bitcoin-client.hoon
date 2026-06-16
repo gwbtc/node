@@ -125,13 +125,13 @@
     ?-  -.gif
     ::
         %receive
-      ~&  >  %tcp-receive
+      :: ~&  >  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =.  last-connected.erd  now.bowl
       =.  earth-peers  (~(put by earth-peers) erp erd)
       |-
       ?~  mes  cor
-      ~&  -.i.mes
+      :: ~&  -.i.mes
       =.  cor  (handle-message [erp erd] i.mes)
       %=  $
           mes  t.mes
@@ -216,23 +216,19 @@
       %version
     =.  services.erd  services.msg
     =.  earth-peers  (~(put by earth-peers) erp erd)
-    =/  mes
-      :~  [%verack ~]
-          [%getheaders make-block-locator ~]
-      ==
     %-  emit
-    %+  send:tcp
-        erp
-        (~(write ne:b-ser network) mes)
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%verack ~]
+        [%getheaders make-block-locator ~]
+    ==
   ::
       %ping
-    =/  mes
-      :~  [%pong nonce.msg]
-      ==
     %-  emit
-    %+  send:tcp
-        erp
-        (~(write ne:b-ser network) mes)
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%pong nonce.msg]
+    ==
   ::
       %addrv2
     ~&  >>  [%addresses (lent addresses.msg)]
@@ -240,12 +236,19 @@
   ::
       %inv
     ~&  >>  [%inv type:(rear inventory.msg)]
+    :: TODO: handle block invs by sending getheaders
     cor
   ::
       %headers
     ~&  >>>  [%headers (lent headers.msg)]
+    ?.  .?(headers.msg)  cor
     |-
-    ?~  headers.msg  cor
+    ?~  headers.msg
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  [%getheaders make-block-locator ~]
+      ==
     =*  hed  i.headers.msg
     =/  val  (~(validate-block-header he:b-val now.bowl block-headers) hed)
     ?-  -.val
@@ -258,7 +261,11 @@
     ::
         %orphan
       ~&  [%orphan-block-header block-hash.val hed]
-      cor
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  [%getheaders make-block-locator ~]
+      ==
     ::
         %invalid
       ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
@@ -384,7 +391,6 @@
     [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%send sid dat])]
   ::
   --
-::
 ::
   ::
 ::
