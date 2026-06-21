@@ -63,9 +63,9 @@
     ^+  en-core
     ?:  (lte aum 0xfc)  (en-prep 1 aum)
     =/  len  (met 3 aum)
-    ?:  (lte len 2)  (en-prep 1 0xfd):(en-prep 2 (rev 3 2^aum))
-    ?:  (lte len 4)  (en-prep 1 0xfe):(en-prep 4 (rev 3 4^aum))
-    ?:  (lte len 8)  (en-prep 1 0xff):(en-prep 8 (rev 3 8^aum))
+    ?:  (lte len 2)  =.(en-core (en-prep 1 0xfd) (en-prep 2 aum))
+    ?:  (lte len 4)  =.(en-core (en-prep 1 0xfe) (en-prep 4 aum))
+    ?:  (lte len 8)  =.(en-core (en-prep 1 0xff) (en-prep 8 aum))
     ~|  %invalid-compactsize
     !!
   ::

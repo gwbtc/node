@@ -1,7 +1,8 @@
 /-  *bitcoin-common,
     b-net=bitcoin-network
 /+  b-val=bitcoin-validation,
-    b-ser=bitcoin-serialization
+    b-ser=bitcoin-serialization,
+    b-fil=bitcoin-compact-block-filters
 |%
 +$  earth-peer
   $:  net-id=network-address-id:b-net
@@ -46,6 +47,30 @@
   |=  [mak=mark vaz=vase]
   ^+  cor
   ?+  mak  ~|(bad-poke/mak !!) 
+  ::
+      %test-match-filter
+    =+  !<([haz=block-hash fil=hexb spk=(list @t)] vaz)
+    =/  tar
+      %+  turn  spk
+      |=  t=@t
+      =/  dat  (need (de:base16:mimes:html t))
+      :-  p.dat
+          (rev 3 dat)
+    ?:  (match:b-fil haz fil tar)
+      ~&  >  'match'
+      ~&  >  ['match all:' (all-match:b-fil haz fil tar)]
+      cor
+    ~&  >>  'none'
+    cor
+  ::
+      %test-get-filter
+    =+  !<([het=block-height haz=block-hash] vaz)
+    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%getcfilters 0 het haz]
+    ==
   ::
       %log-block-headers-info
     ~&  >>  [%best-block best-block]
@@ -125,13 +150,13 @@
     ?-  -.gif
     ::
         %receive
-      :: ~&  >  %tcp-receive
+      ~&  >  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =.  last-connected.erd  now.bowl
       =.  earth-peers  (~(put by earth-peers) erp erd)
       |-
       ?~  mes  cor
-      :: ~&  -.i.mes
+      ~&  -.i.mes
       =.  cor  (handle-message [erp erd] i.mes)
       %=  $
           mes  t.mes
@@ -212,6 +237,11 @@
   |=  [[erp=earth-peer erd=earth-peer-state] msg=message:b-net]
   ^+  cor
   ?+  -.msg  cor
+  ::
+      %cfilter
+    ~&  >>  'got filter:'
+    ~&  >  +.msg
+    cor
   ::
       %version
     =.  services.erd  services.msg
