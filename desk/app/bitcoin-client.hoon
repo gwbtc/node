@@ -17,7 +17,11 @@
 +$  earth-peers  (map earth-peer earth-peer-state)
 ::
 +$  best-block  [=block-hash =block-height =chainwork]
-+$  bh-index  ((mop block-height block-hash) lth)
++$  bh-index    ((mop block-height block-hash) lth)
+::
++$  best-filter-header  [=block-height =block-hash]
++$  filter-headers      (map block-hash filter-header:b-fil)
++$  filters             (map block-hash filter:b-fil)
 ::
 +$  state-0
   $:  =protocol-version:b-net
@@ -25,6 +29,9 @@
       =earth-peers
       =best-block
       =bh-index
+      =best-filter-header
+      =filter-headers
+      =filters
       =block-headers
   ==
 +$  state-n
@@ -63,6 +70,15 @@
     ~&  >>  'none'
     cor
   ::
+      %test-get-filter-header
+    =+  !<([het=block-height haz=block-hash] vaz)
+    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%getcfheaders 0 het haz]
+    ==
+  ::
       %test-get-filter
     =+  !<([het=block-height haz=block-hash] vaz)
     =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
@@ -72,10 +88,13 @@
     :~  [%getcfilters 0 het haz]
     ==
   ::
-      %log-block-headers-info
-    ~&  >>  [%best-block best-block]
-    ~&  >>  [%bh-index ~(wyt in bh-index)]
-    ~&  >>  [%headers ~(wyt in block-headers)]
+      %log-headers-info
+    ~&  >   [%best-block best-block]
+    ~&  >   [%bh-index ~(wyt in bh-index)]
+    ~&  >   [%headers ~(wyt in block-headers)]
+    ~&  >>  [%best-filter-header best-filter-header]
+    ~&  >>  [%filter-headers ~(wyt in filter-headers)]
+    ~&  >>  [%filters ~(wyt in filters)]
     cor
   ::
       %log-block-header
@@ -150,13 +169,13 @@
     ?-  -.gif
     ::
         %receive
-      ~&  >  %tcp-receive
+      :: ~&  >  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =.  last-connected.erd  now.bowl
       =.  earth-peers  (~(put by earth-peers) erp erd)
       |-
       ?~  mes  cor
-      ~&  -.i.mes
+      :: ~&  -.i.mes
       =.  cor  (handle-message [erp erd] i.mes)
       %=  $
           mes  t.mes
@@ -233,15 +252,21 @@
       user-agent  'urbit'
   ==
 ::
+++  make-getcfheaders-message
+  ^-  message:b-net
+  =/  start  +(block-height.best-filter-header)
+  =/  stop
+    =/  het  (add start 1.999)
+    ?:  (gte het block-height.best-block)  block-hash.best-block
+    %+  got:on-bh-index
+        bh-index
+        het
+  [%getcfheaders 0 start stop]
+::
 ++  handle-message
   |=  [[erp=earth-peer erd=earth-peer-state] msg=message:b-net]
   ^+  cor
   ?+  -.msg  cor
-  ::
-      %cfilter
-    ~&  >>  'got filter:'
-    ~&  >  +.msg
-    cor
   ::
       %version
     =.  services.erd  services.msg
@@ -269,9 +294,47 @@
     :: TODO: handle block invs by sending getheaders
     cor
   ::
+      %cfilter
+    ~&  >  msg
+    cor
+  ::
+      %cfheaders
+    =/  len  (lent filter-hashes.msg)
+    =/  tip  (~(got by filter-headers) block-hash.best-filter-header)
+    =/  til  (got:on-bh-index bh-index (add block-height.best-filter-header len))
+    ?>  =(0 filter-type.msg)
+    ?>  =(tip previous-filter-header.msg)
+    ?>  =(til stop-hash.msg)
+    =/  pre  previous-filter-header.msg
+    =/  het  +(block-height.best-filter-header)
+    |-
+    ?~  filter-hashes.msg
+      ?:  =(block-hash.best-filter-header block-hash.best-block)  cor
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  make-getcfheaders-message
+      ==
+    =/  haz  (got:on-bh-index bh-index het)
+    =/  fed  (make-filter-header:b-fil pre i.filter-hashes.msg)
+    %=  $
+        filter-hashes.msg   t.filter-hashes.msg
+        pre                 fed
+        het                 +(het)
+        best-filter-header  [het haz]
+        filter-headers      (~(put by filter-headers) haz fed)
+    ==
+  ::
       %headers
-    ~&  >>>  [%headers (lent headers.msg)]
-    ?.  .?(headers.msg)  cor
+    ~&  >>>  [%headers ?~(headers.msg %done %more)]
+    ?.  .?(headers.msg)
+      :: if block headers are caught up, get filter headers
+      ?:  =(block-hash.best-block block-hash.best-filter-header)  cor
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  make-getcfheaders-message
+      ==
     |-
     ?~  headers.msg
       %-  emit
@@ -321,6 +384,7 @@
       :: reorg case
       :: - roll back bh-index to the last common block,
       ::   and graft on the new best branch.
+      :: - handle changing the best-filter-header
       :: - TODO: update affected subscriptions
       =/  new-best-block  `^best-block`[haz het wok]
       =/  new-best-branch
@@ -353,17 +417,33 @@
             new-hash  previous-block-hash.block-header.new-head
             old-hash  previous-block-hash.block-header.old-head
         ==
-      =.  best-block  new-best-block
       =.  bh-index
         %^  lot:on-bh-index  bh-index  ~
         :-  ~
         =<  key.head
         %-  pop:on-bh-index
             new-best-branch
+      =/  last-common-block
+        ^-  [=block-height =block-hash]
+        %-  need
+            (ram:on-bh-index bh-index)
       =.  bh-index
         %+  uni:on-bh-index
             bh-index
             new-best-branch
+      =.  best-block  new-best-block
+      =.  best-filter-header
+        =/  las  last-common-block
+        |-
+        =/  fed  (~(get by filter-headers) block-hash.las)
+        ?~  fed  best-filter-header
+        =.  best-filter-header  las
+        =/  nex  +(block-height.las)
+        =/  nax  (get:on-bh-index bh-index nex)
+        ?~  nax  best-filter-header
+        %=  $
+            las  [nex u.nax]
+        ==
       %=  $
           headers.msg  t.headers.msg
       ==
@@ -434,9 +514,14 @@
   =*  wok  chainwork.val
   %_  cor
       network        %mainnet
+  ::
       best-block     [haz het wok]
       bh-index       (put:on-bh-index bh-index het haz)
       block-headers  (~(put by block-headers) haz het wok gen)
+  ::
+      best-filter-header  [het haz]
+      filter-headers      (~(put by filter-headers) haz genesis-filter-header:b-fil)
+      filters             (~(put by filters) haz genesis-filter:b-fil)
   ==
 ::
 ++  save

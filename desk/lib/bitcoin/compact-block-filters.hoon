@@ -10,6 +10,26 @@
 ::
 +$  bits  [wid=@ud dat=@ub]
 ::
+++  genesis-filter         [4 0x80a8.7f01]
+++  genesis-filter-header  0x2c2.3921.80d0.ce2b.5b6f.8b08.d39a.11ff.e831.c673.311a.3ecf.77b9.7fc3.f030.3c9f
+::
+++  make-filter-header
+  |=  [prev=filter-header filter-hash=@ux]
+  ^-  filter-header
+  %+  shay  32
+  %+  shay  64
+  %+  can  3
+  :~  [32 filter-hash]
+      [32 prev]
+  ==
+::
+++  make-filter-hash
+  |=  fil=filter
+  ^-  @ux
+  %+  shay  32
+  %-  shay
+      fil
+::
 ++  params
   |%
   ++  p  19
