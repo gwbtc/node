@@ -4,6 +4,7 @@
 +$  block-height   @ud
 +$  block-hash     @ux
 +$  txid           @ux
++$  wtxid          @ux
 +$  vout           @ud
 +$  outpoint       [=txid =vout]
 +$  script-sig     hexb

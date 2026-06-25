@@ -1,4 +1,5 @@
 /-  *bitcoin-common,
+    *bitcoin-light-client,
     b-net=bitcoin-network
 /+  b-val=bitcoin-validation,
     b-ser=bitcoin-serialization,
@@ -11,10 +12,13 @@
   ==
 +$  earth-peer-state
   $:  last-connected=time
+      starting-height=block-height
       =services:b-net
       buffer=hexb
   ==
 +$  earth-peers  (map earth-peer earth-peer-state)
+::
++$  is-synced  _|
 ::
 +$  best-block  [=block-hash =block-height =chainwork]
 +$  bh-index    ((mop block-height block-hash) lth)
@@ -27,6 +31,7 @@
   $:  =protocol-version:b-net
       =network:b-net
       =earth-peers
+      =is-synced
       =best-block
       =bh-index
       =best-filter-header
@@ -53,6 +58,7 @@
 ++  poke
   |=  [mak=mark vaz=vase]
   ^+  cor
+  ?>  =(src.bowl our.bowl)
   ?+  mak  ~|(bad-poke/mak !!) 
   ::
       %test-match-filter
@@ -134,7 +140,23 @@
 ++  watch
   |=  poe=(pole @ta)
   ^+  cor
-  cor
+  ?>  =(src.bowl our.bowl)
+  ?+  poe  !!
+  ::
+      [%is-synced ~]
+    %-  emit
+    :*  %give  %fact  ~
+        %is-synced  !>(`is-synced:update`is-synced)
+    ==
+  ::
+      [%best-block ~]
+    =/  dat  [%new block-height.best-block block-hash.best-block]
+    %-  emit
+    :*  %give  %fact  ~
+        %best-block  !>(`best-block:update`dat)
+    ==
+  ::
+  ==
 ::
 ++  leave
   |=  poe=(pole @ta)
@@ -187,6 +209,13 @@
     ::
         %closed
       ~&  >>>  %tcp-closed
+      =.  earth-peers  (~(del by earth-peers) erp)
+      ?~  earth-peers
+        =.  is-synced  |
+        %-  emit
+        :*  %give  %fact  /is-synced^~
+            %is-synced  !>(`is-synced:update`is-synced)
+        ==
       cor
     ::
         %error
@@ -269,7 +298,9 @@
   ?+  -.msg  cor
   ::
       %version
-    =.  services.erd  services.msg
+    =:  services.erd         services.msg
+        starting-height.erd  starting-height.msg
+      ==
     =.  earth-peers  (~(put by earth-peers) erp erd)
     %-  emit
     %+  send:tcp  erp
@@ -309,7 +340,12 @@
     =/  het  +(block-height.best-filter-header)
     |-
     ?~  filter-hashes.msg
-      ?:  =(block-hash.best-filter-header block-hash.best-block)  cor
+      ?:  =(block-hash.best-filter-header block-hash.best-block)
+        =.  is-synced  &
+        %-  emit
+        :*  %give  %fact  /is-synced^~
+            %is-synced  !>(`is-synced:update`is-synced)
+        ==
       %-  emit
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
@@ -326,10 +362,18 @@
     ==
   ::
       %headers
-    ~&  >>>  [%headers ?~(headers.msg %done %more)]
+    :: current heuristic for determining if block headers are synced:
+    :: keep requesting headers until a headers response is null
+    :: TODO: improve this
     ?.  .?(headers.msg)
-      :: if block headers are caught up, get filter headers
-      ?:  =(block-hash.best-block block-hash.best-filter-header)  cor
+      ?:  =(block-hash.best-block block-hash.best-filter-header)
+        =.  is-synced  &
+        %-  emit
+        :*  %give  %fact  /is-synced^~
+            %is-synced  !>(`is-synced:update`is-synced)
+        ==
+      :: if block headers are caught up and filter headers aren't,
+      :: get filter headers
       %-  emit
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
@@ -378,6 +422,12 @@
       ?.  is-reorg
         =?  best-block  is-new-best-block  [haz het wok]
         =?  bh-index    is-extending-best  (put:on-bh-index bh-index het haz)
+        =?  cor         is-new-best-block
+          =/  dat  [%new het haz]
+          %-  emit
+          :*  %give  %fact  /best-block^~
+              %best-block  !>(`best-block:update`dat)
+          ==
         %=  $
             headers.msg  t.headers.msg
         ==
@@ -385,7 +435,7 @@
       :: - roll back bh-index to the last common block,
       ::   and graft on the new best branch.
       :: - handle changing the best-filter-header
-      :: - TODO: update affected subscriptions
+      :: - update affected subscriptions
       =/  new-best-block  `^best-block`[haz het wok]
       =/  new-best-branch
         ^-  ^bh-index
@@ -443,6 +493,27 @@
         ?~  nax  best-filter-header
         %=  $
             las  [nex u.nax]
+        ==
+      =.  cor
+        =/  dat  [%reorg-rollback last-common-block]
+        %-  emit
+        :*  %give  %fact  /best-block^~
+            %best-block  !>(`best-block:update`dat)
+        ==
+      =.  cor
+        =.  is-synced  |
+        %-  emit
+        :*  %give  %fact  /is-synced^~
+            %is-synced  !>(`is-synced:update`is-synced)
+        ==
+      =.  cor
+        %-  emil
+        %+  turn  (tap:on-bh-index new-best-branch)
+        |=  [key=block-height val=block-hash]
+        ^-  card
+        =/  dat  [%new key val]
+        :*  %give  %fact  /best-block^~
+            %best-block  !>(`best-block:update`dat)
         ==
       %=  $
           headers.msg  t.headers.msg
