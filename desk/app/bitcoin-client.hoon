@@ -18,6 +18,9 @@
   ==
 +$  earth-peers  (map earth-peer earth-peer-state)
 ::
++$  pending-requests      (map path time)
++$  height-subscriptions  (map block-height (set path))
+::
 +$  is-synced  _|
 ::
 +$  best-block  [=block-hash =block-height =chainwork]
@@ -31,6 +34,8 @@
   $:  =protocol-version:b-net
       =network:b-net
       =earth-peers
+      =pending-requests
+      =height-subscriptions
       =is-synced
       =best-block
       =bh-index
@@ -94,13 +99,17 @@
     :~  [%getcfilters 0 het haz]
     ==
   ::
-      %log-headers-info
-    ~&  >   [%best-block best-block]
-    ~&  >   [%bh-index ~(wyt in bh-index)]
-    ~&  >   [%headers ~(wyt in block-headers)]
-    ~&  >>  [%best-filter-header best-filter-header]
-    ~&  >>  [%filter-headers ~(wyt in filter-headers)]
-    ~&  >>  [%filters ~(wyt in filters)]
+      %log-info
+    ~&  >    [%best-block best-block]
+    ~&  >    [%bh-index ~(wyt in bh-index)]
+    ~&  >    [%headers ~(wyt in block-headers)]
+    ~&  >>   [%best-filter-header best-filter-header]
+    ~&  >>   [%filter-headers ~(wyt in filter-headers)]
+    ~&  >>   [%filters ~(wyt in filters)]
+    ~&  >>>  [%earth-peers earth-peers]
+    ~&  >>>  [%pending-requests pending-requests]
+    ~&  >>>  [%height-subscriptions height-subscriptions]
+    ~&  >>>  [%is-synced is-synced]
     cor
   ::
       %log-block-header
@@ -156,6 +165,62 @@
         %best-block  !>(`best-block:update`dat)
     ==
   ::
+      [%block-header %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  dat
+      =/  hed  (~(get by block-headers) haz)
+      ?~  hed  ~
+      :_  block-header.u.hed
+      :*  (get-confirmations block-height.u.hed haz)
+          block-height.u.hed
+          haz
+          chainwork.u.hed
+      ==
+    %-  emil
+    :~  :*  %give  %fact  ~
+            %block-header-by-hash  !>(`block-header-by-hash:update`dat)
+        ==
+        :*  %give  %kick  poe^~  ~^src.bowl
+        ==
+    ==
+  ::
+      [%block-filter %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  hed  (~(get by block-headers) haz)
+    ?~  hed
+      =/  dat  ~
+      %-  emil
+      :~  :*  %give  %fact  ~
+              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
+          ==
+          :*  %give  %kick  poe^~  ~^src.bowl
+          ==
+      ==
+    =/  fil  (~(get by filters) haz)
+    ?^  fil
+      =/  dat
+        :_  u.fil
+        :*  (get-confirmations block-height.u.hed haz)
+            block-height.u.hed
+            haz
+            chainwork.u.hed
+        ==
+      %-  emil
+      :~  :*  %give  %fact  ~
+              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
+          ==
+          :*  %give  %kick  poe^~  ~^src.bowl
+          ==
+      ==
+    ?:  (~(has by pending-requests) poe)  cor
+    =.  pending-requests  (~(put by pending-requests) poe now.bowl)
+    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  (make-getcfilters-message block-height.u.hed haz)
+    ==
+  ::
   ==
 ::
 ++  leave
@@ -198,7 +263,7 @@
       |-
       ?~  mes  cor
       :: ~&  -.i.mes
-      =.  cor  (handle-message [erp erd] i.mes)
+      =.  cor  (handle-message [erp erd] i.mes)  :: TODO: virtualize in case of crash
       %=  $
           mes  t.mes
       ==
@@ -236,6 +301,17 @@
   |%
   ++  max-block-locator-size  101
   --
+::
+++  get-confirmations
+  |=  [het=block-height haz=block-hash]
+  ^-  confirmations
+  =/  taz  (get:on-bh-index bh-index het)
+  ?~  taz  ~
+  ?.  =(haz u.taz)  ~
+  :-  ~
+  %+  sub
+      +(block-height.best-block)
+      het
 ::
 ++  make-block-locator
   ^-  block-locator:b-net
@@ -292,6 +368,11 @@
         het
   [%getcfheaders 0 start stop]
 ::
+++  make-getcfilters-message
+  |=  [start=block-height stop=block-hash]
+  ^-  message:b-net
+  [%getcfilters 0 start stop]
+::
 ++  handle-message
   |=  [[erp=earth-peer erd=earth-peer-state] msg=message:b-net]
   ^+  cor
@@ -326,7 +407,59 @@
     cor
   ::
       %cfilter
-    ~&  >  msg
+    ?>  =(0 filter-type.msg)
+    :: if downloading a new filter,
+    :: verify it against our filter headers
+    =/  hed  (~(got by block-headers) block-hash.msg)
+    ?>  =(block-hash.msg (got:on-bh-index bh-index block-height.hed))
+    =/  prev-height
+      ^-  (unit block-height)
+      ?:  =(0 block-height.hed)  ~
+      :-  ~
+      %-  dec
+          block-height.hed
+    =/  prev-hash
+      ^-  (unit block-hash)
+      ?~  prev-height  ~
+      :-  ~
+      %+  got:on-bh-index
+          bh-index
+          u.prev-height
+    =/  prev-filter-header
+      ?~  prev-hash  0x0
+      %-  ~(got by filter-headers)
+          u.prev-hash
+    =/  this-filter-header
+      %-  ~(got by filter-headers)
+          block-hash.msg
+    =/  fed
+      %+  make-filter-header:b-fil
+          prev-filter-header
+      %-  make-filter-hash:b-fil
+          filter.msg
+    ?.  =(fed this-filter-header)
+      ~&  >>>  %block-filter-failed-to-verify
+      !!
+    =.  filters  (~(put by filters) block-hash.msg filter.msg)
+    =/  watch-hash    /block-filter/hash/[(scot %ux block-hash.msg)]
+    =/  watch-height  /block-filter/height/[(scot %ud block-height.hed)]
+    =/  dat
+      :_  filter.msg
+      :*  (get-confirmations block-height.hed block-hash.msg)
+          block-height.hed
+          block-hash.msg
+          chainwork.hed
+      ==
+    =?  cor  (~(has by pending-requests) watch-hash)
+      =.  pending-requests  (~(del by pending-requests) watch-hash)
+      %-  emil
+      :~  :*  %give  %fact  watch-hash^~
+              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
+          ==
+          :*  %give  %kick  watch-hash^~  ~
+          ==
+      ==
+    :: TODO: check pending-requests for watch height
     cor
   ::
       %cfheaders
@@ -341,6 +474,7 @@
     |-
     ?~  filter-hashes.msg
       ?:  =(block-hash.best-filter-header block-hash.best-block)
+        ?:  is-synced  cor
         =.  is-synced  &
         %-  emit
         :*  %give  %fact  /is-synced^~
@@ -363,10 +497,10 @@
   ::
       %headers
     :: current heuristic for determining if block headers are synced:
-    :: keep requesting headers until a headers response is null
-    :: TODO: improve this
+    :: keep requesting headers until a headers response is null  :: TODO: improve this
     ?.  .?(headers.msg)
       ?:  =(block-hash.best-block block-hash.best-filter-header)
+        ?:  is-synced  cor
         =.  is-synced  &
         %-  emit
         :*  %give  %fact  /is-synced^~
@@ -420,9 +554,9 @@
       =/  is-extending-best  =(block-hash.best-block previous-block-hash.hed)
       =/  is-reorg  &(is-new-best-block !is-extending-best)
       ?.  is-reorg
-        =?  best-block  is-new-best-block  [haz het wok]
-        =?  bh-index    is-extending-best  (put:on-bh-index bh-index het haz)
-        =?  cor         is-new-best-block
+        =?  cor  is-new-best-block
+          =.  best-block  [haz het wok]
+          =.  bh-index    (put:on-bh-index bh-index het haz)
           =/  dat  [%new het haz]
           %-  emit
           :*  %give  %fact  /best-block^~
@@ -436,6 +570,7 @@
       ::   and graft on the new best branch.
       :: - handle changing the best-filter-header
       :: - update affected subscriptions
+      ::
       =/  new-best-block  `^best-block`[haz het wok]
       =/  new-best-branch
         ^-  ^bh-index
@@ -476,7 +611,8 @@
       =/  last-common-block
         ^-  [=block-height =block-hash]
         %-  need
-            (ram:on-bh-index bh-index)
+        %-  ram:on-bh-index
+            bh-index
       =.  bh-index
         %+  uni:on-bh-index
             bh-index

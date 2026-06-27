@@ -2,6 +2,13 @@
     b-net=bitcoin-network
 |%
 ::
++$  block-info
+  $:  =confirmations
+      =block-height
+      =block-hash
+      =chainwork
+  ==
+::
 ++  update
   |%
   ::
@@ -12,38 +19,44 @@
         [%reorg-rollback =block-height =block-hash]
     ==
   ::
-  +$  block-header
+  +$  block-header-by-hash
     $@  ~
-    $:  confirmations=(unit @ud)
-        =block-height
-        =block-hash
+    $:  block-info
+        =block-header
+    ==
+  +$  block-header-by-height
+    $:  block-info
         =block-header
     ==
   ::
-  +$  block-filter
+  +$  block-filter-by-hash
     $@  ~
-    $:  confirmations=(unit @ud)
-        =block-height
-        =block-hash
+    $:  block-info
         filter=hexb
     ==
   ::
-  +$  block
+  +$  block-filter-by-height
+    $:  block-info
+        filter=hexb
+    ==
+  ::
+  +$  block-by-hash
     $@  ~
-    $:  confirmations=(unit @ud)
-        =block-height
-        =block-hash
+    $:  block-info
+        =block
+    ==
+  ::
+  +$  block-by-height
+    $:  block-info
         =block
     ==
   ::
   +$  transaction
     $@  ~
-    $:  confirmations=(unit @ud)
-        index=@ud
-        =block-height
-        =block-hash
+    $:  block-info
         =txid
         =wtxid
+        index=@ud
         =transaction
     ==
   ::
