@@ -130,7 +130,7 @@
       =/  hed  (~(get by block-headers) haz)
       ?~  hed  ~
       :_  block-header.u.hed
-      :*  (get-confirmations block-height.u.hed haz)
+      %:  make-block-info
           block-height.u.hed
           haz
           chainwork.u.hed
@@ -159,7 +159,7 @@
     ?^  fil
       =/  dat
         :_  u.fil
-        :*  (get-confirmations block-height.u.hed haz)
+        %:  make-block-info
             block-height.u.hed
             haz
             chainwork.u.hed
@@ -283,16 +283,31 @@
   ++  max-block-locator-size  101
   --
 ::
-++  get-confirmations
-  |=  [het=block-height haz=block-hash]
-  ^-  confirmations
+++  make-block-info
+  |=  [het=block-height haz=block-hash wok=chainwork]
+  ^-  block-info
   =/  taz  (get:on-bh-index bh-index het)
-  ?~  taz  ~
-  ?.  =(haz u.taz)  ~
-  :-  ~
-  %+  sub
-      +(block-height.best-block)
+  =/  con
+    ^-  confirmations
+    ?~  taz  ~
+    ?.  =(haz u.taz)  ~
+    :-  ~
+    %+  sub
+        +(block-height.best-block)
+        het
+  =/  nex
+    ^-  next-block-hash
+    ?~  taz  ~
+    ?.  =(haz u.taz)  ~
+    %+  get:on-bh-index
+        bh-index
+        +(het)
+  :*  haz
       het
+      con
+      nex
+      wok
+  ==
 ::
 ++  make-block-locator
   ^-  block-locator:b-net
@@ -401,7 +416,7 @@
     =/  watch-height  /block/height/[(scot %ud het)]
     =/  dat
       :_  block.msg
-      :*  (get-confirmations het haz)
+      %:  make-block-info
           het
           haz
           wok
@@ -457,7 +472,7 @@
     =/  watch-height  /block-filter/height/[(scot %ud block-height.hed)]
     =/  dat
       :_  filter.msg
-      :*  (get-confirmations block-height.hed block-hash.msg)
+      %:  make-block-info
           block-height.hed
           block-hash.msg
           chainwork.hed

@@ -32,8 +32,6 @@
 +$  witness-stack        (list hexb)
 +$  transaction-witness  (list witness-stack)
 ::
-+$  confirmations  (unit @ud)
-::
 +$  chainwork  @ux
 ::
 +$  block-headers

@@ -2,10 +2,15 @@
     b-net=bitcoin-network
 |%
 ::
++$  confirmations  (unit @ud)
+::
++$  next-block-hash  (unit block-hash)
+::
 +$  block-info
-  $:  =confirmations
+  $:  =block-hash
       =block-height
-      =block-hash
+      =confirmations
+      =next-block-hash
       =chainwork
   ==
 ::
