@@ -38,6 +38,13 @@
     %-  watch-light-client
         /block-filter/hash/[(scot %ux haz)]
   ::
+      %get-block-by-hash
+    =/  hat  !<(@t vaz)
+    =/  haz  q:(need (de:base16:mimes:html hat))
+    %-  emit
+    %-  watch-light-client
+        /block/hash/[(scot %ux haz)]
+  ::
   ==
 ::
 ++  peek
@@ -100,7 +107,26 @@
     ?.  ?=(%fact -.sin)
       cor
     =/  dat  !<(block-filter-by-hash:update q.cage.sin)
-    ~&  >  dat
+    ?~  dat
+      ~&  >  dat
+      cor
+    ~&  >  -.dat
+    ~&  >  [%filter-wid wid.filter.dat]
+    cor
+  ::
+      [%block %hash *]
+    ?:  ?=(%kick -.sin)
+      ~&  >>  [%kick wir]
+      cor
+    ?.  ?=(%fact -.sin)
+      cor
+    =/  dat  !<(block-by-hash:update q.cage.sin)
+    ?~  dat
+      ~&  >  dat
+      cor
+    ~&  >  -.dat
+    ~&  >  -.block.dat
+    ~&  >  [%txs (lent txs.block.dat)]
     cor
   ::
   ==

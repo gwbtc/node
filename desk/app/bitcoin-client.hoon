@@ -66,39 +66,6 @@
   ?>  =(src.bowl our.bowl)
   ?+  mak  ~|(bad-poke/mak !!) 
   ::
-      %test-match-filter
-    =+  !<([haz=block-hash fil=hexb spk=(list @t)] vaz)
-    =/  tar
-      %+  turn  spk
-      |=  t=@t
-      =/  dat  (need (de:base16:mimes:html t))
-      :-  p.dat
-          (rev 3 dat)
-    ?:  (match:b-fil haz fil tar)
-      ~&  >  'match'
-      ~&  >  ['match all:' (all-match:b-fil haz fil tar)]
-      cor
-    ~&  >>  'none'
-    cor
-  ::
-      %test-get-filter-header
-    =+  !<([het=block-height haz=block-hash] vaz)
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
-    %-  emit
-    %+  send:tcp  erp
-    %-  ~(write ne:b-ser network)
-    :~  [%getcfheaders 0 het haz]
-    ==
-  ::
-      %test-get-filter
-    =+  !<([het=block-height haz=block-hash] vaz)
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
-    %-  emit
-    %+  send:tcp  erp
-    %-  ~(write ne:b-ser network)
-    :~  [%getcfilters 0 het haz]
-    ==
-  ::
       %log-info
     ~&  >    [%best-block best-block]
     ~&  >    [%bh-index ~(wyt in bh-index)]
@@ -110,14 +77,6 @@
     ~&  >>>  [%pending-requests pending-requests]
     ~&  >>>  [%height-subscriptions height-subscriptions]
     ~&  >>>  [%is-synced is-synced]
-    cor
-  ::
-      %log-block-header
-    =/  het  !<(block-height vaz)
-    =/  haz  (got:on-bh-index bh-index het)
-    =/  hed  (~(got by block-headers) haz)
-    ~&  >  haz
-    ~&  >  hed
     cor
   ::
       %open-tcp
@@ -219,6 +178,28 @@
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
     :~  (make-getcfilters-message block-height.u.hed haz)
+    ==
+  ::
+      [%block %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  hed  (~(get by block-headers) haz)
+    ?~  hed
+      =/  dat  ~
+      %-  emil
+      :~  :*  %give  %fact  ~
+              %block-by-hash  !>(`block-by-hash:update`dat)
+          ==
+          :*  %give  %kick  poe^~  ~^src.bowl
+          ==
+      ==
+    :: TODO: check block cache
+    ?:  (~(has by pending-requests) poe)  cor
+    =.  pending-requests  (~(put by pending-requests) poe now.bowl)
+    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%getdata [%msg-block haz] ~]
     ==
   ::
   ==
@@ -404,6 +385,37 @@
       %inv
     ~&  >>  [%inv type:(rear inventory.msg)]
     :: TODO: handle block invs by sending getheaders
+    cor
+  ::
+      %block
+    =/  haz  (make-block-hash:b-ser -.block.msg)
+    =/  hed  (~(got by block-headers) haz)
+    =*  het  block-height.hed
+    =*  wok  chainwork.hed
+    =/  mer  (make-merkle-root:b-val +.block.msg)
+    ?.  =(mer merkle-root.block-header.hed)
+      ~&  >>>  %block-failed-to-verify
+      !!
+    :: TODO: cache block
+    =/  watch-hash    /block/hash/[(scot %ux haz)]
+    =/  watch-height  /block/height/[(scot %ud het)]
+    =/  dat
+      :_  block.msg
+      :*  (get-confirmations het haz)
+          het
+          haz
+          wok
+      ==
+    =?  cor  (~(has by pending-requests) watch-hash)
+      =.  pending-requests  (~(del by pending-requests) watch-hash)
+      %-  emil
+      :~  :*  %give  %fact  watch-hash^~
+              %block-by-hash  !>(`block-by-hash:update`dat)
+          ==
+          :*  %give  %kick  watch-hash^~  ~
+          ==
+      ==
+    :: TODO: check pending-requests for watch height
     cor
   ::
       %cfilter

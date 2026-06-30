@@ -173,6 +173,37 @@
   ::
   --
 ::
+++  make-merkle-root
+  |=  txs=(list transaction)
+  ^-  @ux
+  =/  les  (turn txs make-txid:b-ser)
+  ?~  les  !!
+  |^
+  ?~  t.les  i.les
+  %=  $
+      les  hash-lest
+  ==
+  ++  hash-lest
+    |-
+    ^-  (lest @ux)
+    ?~  t.les
+      :-  (hash i.les i.les)
+          ~
+    :-  (hash i.les i.t.les)
+    ?~  t.t.les  ~
+    %=  $
+        les  t.t.les
+    ==
+  ++  hash
+    |=  [lef=@ux rig=@ux]
+    %+  shay  32
+    %+  shay  64
+    %+  can  3
+    :~  32^lef
+        32^rig
+    ==
+  --
+::
 :: +me
 ::   merkle block core
 ++  me
