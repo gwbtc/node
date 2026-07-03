@@ -59,10 +59,10 @@
   +$  transaction
     $@  ~
     $:  block-info
+        index=@ud
         =txid
         =wtxid
-        index=@ud
-        =transaction
+        =^transaction
     ==
   ::
   --

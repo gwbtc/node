@@ -45,6 +45,14 @@
     %-  watch-light-client
         /block/hash/[(scot %ux haz)]
   ::
+      %get-transaction
+    =+  !<([hat=@t tit=@t] vaz)
+    =/  haz  q:(need (de:base16:mimes:html hat))
+    =/  tid  q:(need (de:base16:mimes:html tit))
+    %-  emit
+    %-  watch-light-client
+        /transaction/[(scot %ux haz)]/[(scot %ux tid)]
+  ::
   ==
 ::
 ++  peek
@@ -127,6 +135,16 @@
     ~&  >  -.dat
     ~&  >  -.block.dat
     ~&  >  [%txs (lent txs.block.dat)]
+    cor
+  ::
+      [%transaction *]
+    ?:  ?=(%kick -.sin)
+      ~&  >>  [%kick wir]
+      cor
+    ?.  ?=(%fact -.sin)
+      cor
+    =/  dat  !<(transaction:update q.cage.sin)
+    ~&  >  dat
     cor
   ::
   ==

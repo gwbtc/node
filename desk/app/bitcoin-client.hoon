@@ -18,8 +18,18 @@
   ==
 +$  earth-peers  (map earth-peer earth-peer-state)
 ::
-+$  pending-requests      (map path time)
-+$  height-subscriptions  (map block-height (set path))
++$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
++$  pending-block-height-reqs  (jug block-height pending-block-height-req)
++$  pending-block-hash-req
+  $%  [%block-filter ~]
+      [%block ~]
+      [%transaction =txid]
+  ==
++$  pending-block-height-req
+  $%  [%block-header ~]
+      [%block-filter ~]
+      [%block ~]
+  ==
 ::
 +$  is-synced  _|
 ::
@@ -34,8 +44,8 @@
   $:  =protocol-version:b-net
       =network:b-net
       =earth-peers
-      =pending-requests
-      =height-subscriptions
+      =pending-block-hash-reqs
+      =pending-block-height-reqs
       =is-synced
       =best-block
       =bh-index
@@ -74,8 +84,8 @@
     ~&  >>   [%filter-headers ~(wyt in filter-headers)]
     ~&  >>   [%filters ~(wyt in filters)]
     ~&  >>>  [%earth-peers earth-peers]
-    ~&  >>>  [%pending-requests pending-requests]
-    ~&  >>>  [%height-subscriptions height-subscriptions]
+    ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
+    ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
     ~&  >>>  [%is-synced is-synced]
     cor
   ::
@@ -126,6 +136,7 @@
   ::
       [%block-header %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
+    :: TODO: update with null if the header is found but stale
     =/  dat
       =/  hed  (~(get by block-headers) haz)
       ?~  hed  ~
@@ -155,6 +166,7 @@
           :*  %give  %kick  poe^~  ~^src.bowl
           ==
       ==
+    :: TODO: update with null if the header is found but stale
     =/  fil  (~(get by filters) haz)
     ?^  fil
       =/  dat
@@ -171,8 +183,9 @@
           :*  %give  %kick  poe^~  ~^src.bowl
           ==
       ==
-    ?:  (~(has by pending-requests) poe)  cor
-    =.  pending-requests  (~(put by pending-requests) poe now.bowl)
+    =/  req  [%block-filter ~]
+    ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
+    =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
     %-  emit
     %+  send:tcp  erp
@@ -192,14 +205,41 @@
           :*  %give  %kick  poe^~  ~^src.bowl
           ==
       ==
+    :: TODO: update with null if the header is found but stale
     :: TODO: check block cache
-    ?:  (~(has by pending-requests) poe)  cor
-    =.  pending-requests  (~(put by pending-requests) poe now.bowl)
+    =/  req  [%block ~]
+    ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
+    =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
-    :~  [%getdata [%msg-block haz] ~]
+    :~  [%getdata [%msg-witness-block haz] ~]
+    ==
+  ::
+      [%transaction block-hash=@ta txid=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  tid  (slav %ux txid.poe)
+    =/  hed  (~(get by block-headers) haz)
+    ?~  hed
+      =/  dat  ~
+      %-  emil
+      :~  :*  %give  %fact  ~
+              %transaction  !>(`transaction:update`dat)
+          ==
+          :*  %give  %kick  poe^~  ~^src.bowl
+          ==
+      ==
+    :: TODO: update with null if the header is found but stale
+    :: TODO: check block cache
+    =/  req  [%transaction tid]
+    ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
+    =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
+    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%getdata [%msg-witness-block haz] ~]
     ==
   ::
   ==
@@ -328,6 +368,26 @@
       het  ?:((lth les het) (sub het les) 0)
   ==
 ::
+++  block-hash-req-path
+  |%
+  ++  en
+    |=  [haz=block-hash req=pending-block-hash-req]
+    ^-  path
+    ?:  ?=(%transaction -.req)
+      /[-.req]/[(scot %ux haz)]/[(scot %ux txid.req)]
+    /[-.req]/hash/[(scot %ux haz)]
+  ::
+  ++  de
+    |=  poe=(pole @ta)
+    ^-  (pair block-hash pending-block-hash-req)
+    ?+  poe  !!
+      [%block-filter %hash block-hash=@ta ~]  [(slav %ux block-hash.poe) -.poe ~]
+      [%block %hash block-hash=@ta ~]         [(slav %ux block-hash.poe) -.poe ~]
+      [%transaction block-hash=@ta txid=@ta ~]
+        [(slav %ux block-hash.poe) -.poe (slav %ux txid.poe)]
+    ==
+  --
+::
 ++  en-earth-peer-path
   |=  erp=earth-peer
   ^-  path
@@ -403,42 +463,114 @@
     cor
   ::
       %block
-    =/  haz  (make-block-hash:b-ser -.block.msg)
+    :: find a known, valid header corresponding to this block,
+    :: and verify this block's transactions against that header's merkle root
+    =*  bok  block.msg
+    =/  haz  (make-block-hash:b-ser -.bok)
     =/  hed  (~(got by block-headers) haz)
     =*  het  block-height.hed
     =*  wok  chainwork.hed
-    =/  mer  (make-merkle-root:b-val +.block.msg)
+    =/  mer  (make-merkle-root:b-val +.bok)
     ?.  =(mer merkle-root.block-header.hed)
-      ~&  >>>  %block-failed-to-verify
+      ~&  >>>  %block-merkle-root-verification-fail
       !!
+    :: update any subscriptions pending this block
     :: TODO: cache block
-    =/  watch-hash    /block/hash/[(scot %ux haz)]
-    =/  watch-height  /block/height/[(scot %ud het)]
-    =/  dat
-      :_  block.msg
-      %:  make-block-info
-          het
-          haz
-          wok
-      ==
-    =?  cor  (~(has by pending-requests) watch-hash)
-      =.  pending-requests  (~(del by pending-requests) watch-hash)
-      %-  emil
-      :~  :*  %give  %fact  watch-hash^~
-              %block-by-hash  !>(`block-by-hash:update`dat)
+    =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
+    =.  cor
+      |-
+      ?~  hash-reqs  cor
+      =.  cor
+        ?-  -.i.hash-reqs
+        ::
+            %block-filter  cor
+        ::
+            %block
+          =.  pending-block-hash-reqs
+            %+  ~(del ju pending-block-hash-reqs)
+                haz
+                i.hash-reqs
+          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
+          =/  dat
+            :_  bok
+            %:  make-block-info
+                het
+                haz
+                wok
+            ==
+          %-  emil
+          :~  :*  %give  %fact  paf^~
+                  %block-by-hash  !>(`block-by-hash:update`dat)
+              ==
+              :*  %give  %kick  paf^~  ~
+              ==
           ==
-          :*  %give  %kick  watch-hash^~  ~
+        ::
+            %transaction
+          =.  pending-block-hash-reqs
+            %+  ~(del ju pending-block-hash-reqs)
+                haz
+                i.hash-reqs
+          =/  txn
+            ^-  $@(~ [index=@ud =txid =wtxid =transaction])
+            =/  ind  0
+            |-
+            ?~  txs.bok  ~
+            =/  tid  (make-txid:b-ser i.txs.bok)
+            ?:  =(tid txid.i.hash-reqs)
+              =/  wid  (make-wtxid:b-ser i.txs.bok)
+              :*  ind
+                  tid
+                  wid
+                  i.txs.bok
+              ==
+            %=  $
+                ind  +(ind)
+                txs.bok  t.txs.bok
+            ==
+          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
+          =/  dat
+            ?~  txn  ~
+            :_  txn
+            %:  make-block-info
+                het
+                haz
+                wok
+            ==
+          %-  emil
+          :~  :*  %give  %fact  paf^~
+                  %transaction  !>(`transaction:update`dat)
+              ==
+              :*  %give  %kick  paf^~  ~
+              ==
           ==
+        ::
+        ==
+      %=  $
+          hash-reqs  t.hash-reqs
       ==
-    :: TODO: check pending-requests for watch height
+    :: TODO: handle height-reqs
+    :: =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+    :: =.  cor
+    ::   |-
+    ::   ?~  height-reqs  cor
+    ::   =.  cor
+    ::     ?-  -.i.height-reqs
+    ::     ==
+    ::   %=  $
+    ::       height-reqs  t.height-reqs
+    ::   ==
     cor
   ::
       %cfilter
     ?>  =(0 filter-type.msg)
-    :: if downloading a new filter,
-    :: verify it against our filter headers
-    =/  hed  (~(got by block-headers) block-hash.msg)
-    ?>  =(block-hash.msg (got:on-bh-index bh-index block-height.hed))
+    :: verify this filter against our filter headers
+    =*  fil  filter.msg
+    =*  haz  block-hash.msg
+    =/  hed  (~(got by block-headers) haz)
+    =*  het  block-height.hed
+    =*  wok  chainwork.hed
+    ?>  =(haz (got:on-bh-index bh-index block-height.hed))
     =/  prev-height
       ^-  (unit block-height)
       ?:  =(0 block-height.hed)  ~
@@ -458,35 +590,65 @@
           u.prev-hash
     =/  this-filter-header
       %-  ~(got by filter-headers)
-          block-hash.msg
+          haz
     =/  fed
       %+  make-filter-header:b-fil
           prev-filter-header
       %-  make-filter-hash:b-fil
-          filter.msg
+          fil
     ?.  =(fed this-filter-header)
-      ~&  >>>  %block-filter-failed-to-verify
+      ~&  >>>  %block-filter-verification-fail
       !!
-    =.  filters  (~(put by filters) block-hash.msg filter.msg)
-    =/  watch-hash    /block-filter/hash/[(scot %ux block-hash.msg)]
-    =/  watch-height  /block-filter/height/[(scot %ud block-height.hed)]
-    =/  dat
-      :_  filter.msg
-      %:  make-block-info
-          block-height.hed
-          block-hash.msg
-          chainwork.hed
-      ==
-    =?  cor  (~(has by pending-requests) watch-hash)
-      =.  pending-requests  (~(del by pending-requests) watch-hash)
-      %-  emil
-      :~  :*  %give  %fact  watch-hash^~
-              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
+    :: cache the block filter
+    =.  filters  (~(put by filters) haz fil)
+    :: update any subscriptions pending this block filter
+    =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
+    =.  cor
+      |-
+      ?~  hash-reqs  cor
+      =.  cor
+        ?-  -.i.hash-reqs
+        ::
+            %block  cor
+        ::
+            %transaction  cor
+        ::
+            %block-filter
+          =.  pending-block-hash-reqs
+            %+  ~(del ju pending-block-hash-reqs)
+                haz
+                i.hash-reqs
+          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
+          =/  dat
+            :_  fil
+            %:  make-block-info
+                het
+                haz
+                wok
+            ==
+          %-  emil
+          :~  :*  %give  %fact  paf^~
+                  %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
+              ==
+              :*  %give  %kick  paf^~  ~
+              ==
           ==
-          :*  %give  %kick  watch-hash^~  ~
-          ==
+        ::
+        ==
+      %=  $
+          hash-reqs  t.hash-reqs
       ==
-    :: TODO: check pending-requests for watch height
+    :: TODO: handle height-reqs
+    :: =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+    :: =.  cor
+    ::   |-
+    ::   ?~  height-reqs  cor
+    ::   =.  cor
+    ::     ?-  -.i.height-reqs
+    ::     ==
+    ::   %=  $
+    ::       height-reqs  t.height-reqs
+    ::   ==
     cor
   ::
       %cfheaders
