@@ -123,23 +123,21 @@
   ::
       [%is-synced ~]
     %-  emit
-    :*  %give  %fact  ~
-        %is-synced  !>(`is-synced:update`is-synced)
-    ==
+    %~  is-synced  make-update  ~^src.bowl
   ::
       [%best-block ~]
-    =/  dat  [%new block-height.best-block block-hash.best-block]
     %-  emit
-    :*  %give  %fact  ~
-        %best-block  !>(`best-block:update`dat)
-    ==
+    %-  ~(best-block make-update ~^src.bowl)
+    :+  %new
+        block-height.best-block
+        block-hash.best-block
   ::
       [%block-header %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
-    :: TODO: update with null if the header is found but stale
     =/  dat
       =/  hed  (~(get by block-headers) haz)
       ?~  hed  ~
+      ?.  (main-chain-has-hash-at-height haz block-height.u.hed)  ~
       :_  block-header.u.hed
       %:  make-block-info
           block-height.u.hed
@@ -147,41 +145,33 @@
           chainwork.u.hed
       ==
     %-  emil
-    :~  :*  %give  %fact  ~
-            %block-header-by-hash  !>(`block-header-by-hash:update`dat)
-        ==
-        :*  %give  %kick  poe^~  ~^src.bowl
-        ==
-    ==
+    %+  ~(block-header-by-hash make-update ~^src.bowl)
+        haz
+        dat
   ::
       [%block-filter %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
-      =/  dat  ~
       %-  emil
-      :~  :*  %give  %fact  ~
-              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
-          ==
-          :*  %give  %kick  poe^~  ~^src.bowl
-          ==
-      ==
-    :: TODO: update with null if the header is found but stale
+      %+  ~(block-filter-by-hash make-update ~^src.bowl)
+          haz
+          ~
+    ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
+      %-  emil
+      %+  ~(block-filter-by-hash make-update ~^src.bowl)
+          haz
+          ~
     =/  fil  (~(get by filters) haz)
     ?^  fil
-      =/  dat
-        :_  u.fil
-        %:  make-block-info
-            block-height.u.hed
-            haz
-            chainwork.u.hed
-        ==
       %-  emil
-      :~  :*  %give  %fact  ~
-              %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
-          ==
-          :*  %give  %kick  poe^~  ~^src.bowl
-          ==
+      %+  ~(block-filter-by-hash make-update ~^src.bowl)
+          haz
+      :_  u.fil
+      %:  make-block-info
+          block-height.u.hed
+          haz
+          chainwork.u.hed
       ==
     =/  req  [%block-filter ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
@@ -197,15 +187,15 @@
     =/  haz  (slav %ux block-hash.poe)
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
-      =/  dat  ~
       %-  emil
-      :~  :*  %give  %fact  ~
-              %block-by-hash  !>(`block-by-hash:update`dat)
-          ==
-          :*  %give  %kick  poe^~  ~^src.bowl
-          ==
-      ==
-    :: TODO: update with null if the header is found but stale
+      %+  ~(block-by-hash make-update ~^src.bowl)
+          haz
+          ~
+    ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
+      %-  emil
+      %+  ~(block-by-hash make-update ~^src.bowl)
+          haz
+          ~
     :: TODO: check block cache
     =/  req  [%block ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
@@ -222,15 +212,17 @@
     =/  tid  (slav %ux txid.poe)
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
-      =/  dat  ~
       %-  emil
-      :~  :*  %give  %fact  ~
-              %transaction  !>(`transaction:update`dat)
-          ==
-          :*  %give  %kick  poe^~  ~^src.bowl
-          ==
-      ==
-    :: TODO: update with null if the header is found but stale
+      %^  ~(transaction make-update ~^src.bowl)
+          haz
+          tid
+          ~
+    ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
+      %-  emil
+      %^  ~(transaction make-update ~^src.bowl)
+          haz
+          tid
+          ~
     :: TODO: check block cache
     =/  req  [%transaction tid]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
@@ -299,9 +291,7 @@
       ?~  earth-peers
         =.  is-synced  |
         %-  emit
-        :*  %give  %fact  /is-synced^~
-            %is-synced  !>(`is-synced:update`is-synced)
-        ==
+        %~  is-synced  make-update  ~
       cor
     ::
         %error
@@ -322,6 +312,14 @@
   |%
   ++  max-block-locator-size  101
   --
+::
+++  main-chain-has-hash-at-height
+  |=  [haz=block-hash het=block-height]
+  ^-  ?
+  =/  taz  (get:on-bh-index bh-index het)
+  ?~  taz  |
+  .=  haz
+      u.taz
 ::
 ++  make-block-info
   |=  [het=block-height haz=block-hash wok=chainwork]
@@ -368,24 +366,56 @@
       het  ?:((lth les het) (sub het les) 0)
   ==
 ::
-++  block-hash-req-path
-  |%
-  ++  en
-    |=  [haz=block-hash req=pending-block-hash-req]
-    ^-  path
-    ?:  ?=(%transaction -.req)
-      /[-.req]/[(scot %ux haz)]/[(scot %ux txid.req)]
-    /[-.req]/hash/[(scot %ux haz)]
+++  make-update
+  |_  for=(unit ship)
   ::
-  ++  de
-    |=  poe=(pole @ta)
-    ^-  (pair block-hash pending-block-hash-req)
-    ?+  poe  !!
-      [%block-filter %hash block-hash=@ta ~]  [(slav %ux block-hash.poe) -.poe ~]
-      [%block %hash block-hash=@ta ~]         [(slav %ux block-hash.poe) -.poe ~]
-      [%transaction block-hash=@ta txid=@ta ~]
-        [(slav %ux block-hash.poe) -.poe (slav %ux txid.poe)]
+  ++  is-synced
+    ^-  card
+    =/  dat  `is-synced:update`^is-synced
+    =/  paf  /is-synced
+    %+  fact  paf  [%is-synced !>(dat)]
+  ::
+  ++  best-block
+    |=  dat=best-block:update
+    ^-  card
+    =/  paf  /best-block
+    %+  fact  paf  [%best-block !>(dat)]
+  ::
+  ++  block-header-by-hash
+    |=  [haz=block-hash dat=block-header-by-hash:update]
+    ^-  (list card)
+    =/  paf  /block-header/hash/[(scot %ux haz)]
+    :~  (fact paf %block-header-by-hash !>(dat))
+        (kick paf)
     ==
+  ::
+  ++  block-filter-by-hash
+    |=  [haz=block-hash dat=block-filter-by-hash:update]
+    ^-  (list card)
+    =/  paf  /block-filter/hash/[(scot %ux haz)]
+    :~  (fact paf %block-filter-by-hash !>(dat))
+        (kick paf)
+    ==
+  ::
+  ++  block-by-hash
+    |=  [haz=block-hash dat=block-by-hash:update]
+    ^-  (list card)
+    =/  paf  /block/hash/[(scot %ux haz)]
+    :~  (fact paf %block-by-hash !>(dat))
+        (kick paf)
+    ==
+  ::
+  ++  transaction
+    |=  [haz=block-hash tid=txid dat=transaction:update]
+    ^-  (list card)
+    =/  paf  /transaction/[(scot %ux haz)]/[(scot %ux tid)]
+    :~  (fact paf %transaction !>(dat))
+        (kick paf)
+    ==
+  ::
+  ++  fact  |=([paf=path cag=cage] [%give %fact ?-(for ~ paf^~, ^ ~) cag])
+  ++  kick  |=(paf=path [%give %kick paf^~ for])
+  ::
   --
 ::
 ++  en-earth-peer-path
@@ -490,20 +520,14 @@
             %+  ~(del ju pending-block-hash-reqs)
                 haz
                 i.hash-reqs
-          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
-          =/  dat
-            :_  bok
-            %:  make-block-info
-                het
-                haz
-                wok
-            ==
           %-  emil
-          :~  :*  %give  %fact  paf^~
-                  %block-by-hash  !>(`block-by-hash:update`dat)
-              ==
-              :*  %give  %kick  paf^~  ~
-              ==
+          %+  ~(block-by-hash make-update ~)
+              haz
+          :_  bok
+          %:  make-block-info
+              het
+              haz
+              wok
           ==
         ::
             %transaction
@@ -528,21 +552,16 @@
                 ind  +(ind)
                 txs.bok  t.txs.bok
             ==
-          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
-          =/  dat
-            ?~  txn  ~
-            :_  txn
-            %:  make-block-info
-                het
-                haz
-                wok
-            ==
           %-  emil
-          :~  :*  %give  %fact  paf^~
-                  %transaction  !>(`transaction:update`dat)
-              ==
-              :*  %give  %kick  paf^~  ~
-              ==
+          %^  ~(transaction make-update ~)
+              haz
+              txid.i.hash-reqs
+          ?~  txn  ~
+          :_  txn
+          %:  make-block-info
+              het
+              haz
+              wok
           ==
         ::
         ==
@@ -618,20 +637,14 @@
             %+  ~(del ju pending-block-hash-reqs)
                 haz
                 i.hash-reqs
-          =/  paf  (en:block-hash-req-path haz i.hash-reqs)
-          =/  dat
-            :_  fil
-            %:  make-block-info
-                het
-                haz
-                wok
-            ==
           %-  emil
-          :~  :*  %give  %fact  paf^~
-                  %block-filter-by-hash  !>(`block-filter-by-hash:update`dat)
-              ==
-              :*  %give  %kick  paf^~  ~
-              ==
+          %+  ~(block-filter-by-hash make-update ~)
+              haz
+          :_  fil
+          %:  make-block-info
+              het
+              haz
+              wok
           ==
         ::
         ==
@@ -666,9 +679,7 @@
         ?:  is-synced  cor
         =.  is-synced  &
         %-  emit
-        :*  %give  %fact  /is-synced^~
-            %is-synced  !>(`is-synced:update`is-synced)
-        ==
+        %~  is-synced  make-update  ~
       %-  emit
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
@@ -692,9 +703,7 @@
         ?:  is-synced  cor
         =.  is-synced  &
         %-  emit
-        :*  %give  %fact  /is-synced^~
-            %is-synced  !>(`is-synced:update`is-synced)
-        ==
+        %~  is-synced  make-update  ~
       :: if block headers are caught up and filter headers aren't,
       :: get filter headers
       %-  emit
@@ -746,11 +755,11 @@
         =?  cor  is-new-best-block
           =.  best-block  [haz het wok]
           =.  bh-index    (put:on-bh-index bh-index het haz)
-          =/  dat  [%new het haz]
           %-  emit
-          :*  %give  %fact  /best-block^~
-              %best-block  !>(`best-block:update`dat)
-          ==
+          %-  ~(best-block make-update ~)
+          :+  %new
+              het
+              haz
         %=  $
             headers.msg  t.headers.msg
         ==
@@ -819,27 +828,24 @@
         %=  $
             las  [nex u.nax]
         ==
+      :: TODO: kick all affected data request subscriptions
       =.  cor
-        =/  dat  [%reorg-rollback last-common-block]
         %-  emit
-        :*  %give  %fact  /best-block^~
-            %best-block  !>(`best-block:update`dat)
-        ==
+        %-  ~(best-block make-update ~)
+        :-  %reorg-rollback
+            last-common-block
       =.  cor
         =.  is-synced  |
         %-  emit
-        :*  %give  %fact  /is-synced^~
-            %is-synced  !>(`is-synced:update`is-synced)
-        ==
+        %~  is-synced  make-update  ~
       =.  cor
         %-  emil
         %+  turn  (tap:on-bh-index new-best-branch)
         |=  [key=block-height val=block-hash]
-        ^-  card
-        =/  dat  [%new key val]
-        :*  %give  %fact  /best-block^~
-            %best-block  !>(`best-block:update`dat)
-        ==
+        %-  ~(best-block make-update ~)
+        :+  %new
+            key
+            val
       %=  $
           headers.msg  t.headers.msg
       ==
