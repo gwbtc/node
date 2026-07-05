@@ -145,8 +145,7 @@
           chainwork.u.hed
       ==
     %-  emil
-    %+  ~(block-header-by-hash make-update ~^src.bowl)
-        haz
+    %-  ~(res ~(block-header-by-hash make-update ~^src.bowl) haz)
         dat
   ::
       [%block-header %height block-height=@ta ~]
@@ -155,8 +154,7 @@
       =/  haz  (got:on-bh-index bh-index het)
       =/  hed  (~(got by block-headers) haz)
       %-  emil
-      %+  ~(block-header-by-height make-update ~^src.bowl)
-          het
+      %-  ~(res ~(block-header-by-height make-update ~^src.bowl) het)
       :_  block-header.hed
       %:  make-block-info
           het
@@ -174,19 +172,16 @@
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
       %-  emil
-      %+  ~(block-filter-by-hash make-update ~^src.bowl)
-          haz
+      %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
           ~
     ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
       %-  emil
-      %+  ~(block-filter-by-hash make-update ~^src.bowl)
-          haz
+      %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
           ~
     =/  fil  (~(get by filters) haz)
     ?^  fil
       %-  emil
-      %+  ~(block-filter-by-hash make-update ~^src.bowl)
-          haz
+      %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
       :_  u.fil
       %:  make-block-info
           block-height.u.hed
@@ -211,8 +206,7 @@
       =/  fil  (~(get by filters) haz)
       ?^  fil
         %-  emil
-        %+  ~(block-filter-by-height make-update ~^src.bowl)
-            het
+        %-  ~(res ~(block-filter-by-height make-update ~^src.bowl) het)
         :_  u.fil
         %:  make-block-info
             het
@@ -239,13 +233,11 @@
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
       %-  emil
-      %+  ~(block-by-hash make-update ~^src.bowl)
-          haz
+      %-  ~(res ~(block-by-hash make-update ~^src.bowl) haz)
           ~
     ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
       %-  emil
-      %+  ~(block-by-hash make-update ~^src.bowl)
-          haz
+      %-  ~(res ~(block-by-hash make-update ~^src.bowl) haz)
           ~
     :: TODO: check block cache
     =/  req  [%block ~]
@@ -285,15 +277,11 @@
     =/  hed  (~(get by block-headers) haz)
     ?~  hed
       %-  emil
-      %^  ~(transaction make-update ~^src.bowl)
-          haz
-          tid
+      %-  ~(res ~(transaction make-update ~^src.bowl) haz tid)
           ~
     ?.  (main-chain-has-hash-at-height haz block-height.u.hed)
       %-  emil
-      %^  ~(transaction make-update ~^src.bowl)
-          haz
-          tid
+      %-  ~(res ~(transaction make-update ~^src.bowl) haz tid)
           ~
     :: TODO: check block cache
     =/  req  [%transaction tid]
@@ -455,63 +443,91 @@
     %+  fact  paf  [%best-block !>(dat)]
   ::
   ++  block-header-by-hash
-    |=  [haz=block-hash dat=block-header-by-hash:update]
-    ^-  (list card)
-    =/  paf  /block-header/hash/[(scot %ux haz)]
-    :~  (fact paf %block-header-by-hash !>(dat))
-        (kick paf)
-    ==
+    |_  haz=block-hash
+    ++  sub  /block-header/hash/[(scot %ux haz)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-header-by-hash:update
+      ^-  (list card)
+      :~  (fact sub %block-header-by-hash !>(dat))
+          end
+      ==
+    --
   ::
   ++  block-header-by-height
-    |=  [het=block-height dat=block-header-by-height:update]
-    ^-  (list card)
-    =/  paf  /block-header/height/[(scot %ud het)]
-    :~  (fact paf %block-header-by-height !>(dat))
-        (kick paf)
-    ==
+    |_  het=block-height
+    ++  sub  /block-header/height/[(scot %ud het)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-header-by-height:update
+      ^-  (list card)
+      :~  (fact sub %block-header-by-height !>(dat))
+          end
+      ==
+    --
   ::
   ++  block-filter-by-hash
-    |=  [haz=block-hash dat=block-filter-by-hash:update]
-    ^-  (list card)
-    =/  paf  /block-filter/hash/[(scot %ux haz)]
-    :~  (fact paf %block-filter-by-hash !>(dat))
-        (kick paf)
-    ==
+    |_  haz=block-hash
+    ++  sub  /block-filter/hash/[(scot %ux haz)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-filter-by-hash:update
+      ^-  (list card)
+      :~  (fact sub %block-filter-by-hash !>(dat))
+          end
+      ==
+    --
   ::
   ++  block-filter-by-height
-    |=  [het=block-height dat=block-filter-by-height:update]
-    ^-  (list card)
-    =/  paf  /block-filter/height/[(scot %ud het)]
-    :~  (fact paf %block-filter-by-height !>(dat))
-        (kick paf)
-    ==
+    |_  het=block-height
+    ++  sub  /block-filter/height/[(scot %ud het)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-filter-by-height:update
+      ^-  (list card)
+      :~  (fact sub %block-filter-by-height !>(dat))
+          end
+      ==
+    --
   ::
   ++  block-by-hash
-    |=  [haz=block-hash dat=block-by-hash:update]
-    ^-  (list card)
-    =/  paf  /block/hash/[(scot %ux haz)]
-    :~  (fact paf %block-by-hash !>(dat))
-        (kick paf)
-    ==
+    |_  haz=block-hash
+    ++  sub  /block/hash/[(scot %ux haz)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-by-hash:update
+      ^-  (list card)
+      :~  (fact sub %block-by-hash !>(dat))
+          end
+      ==
+    --
   ::
   ++  block-by-height
-    |=  [het=block-height dat=block-by-height:update]
-    ^-  (list card)
-    =/  paf  /block/height/[(scot %ud het)]
-    :~  (fact paf %block-by-height !>(dat))
-        (kick paf)
-    ==
+    |_  het=block-height
+    ++  sub  /block/height/[(scot %ud het)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=block-by-height:update
+      ^-  (list card)
+      :~  (fact sub %block-by-height !>(dat))
+          end
+      ==
+    --
   ::
   ++  transaction
-    |=  [haz=block-hash tid=txid dat=transaction:update]
-    ^-  (list card)
-    =/  paf  /transaction/[(scot %ux haz)]/[(scot %ux tid)]
-    :~  (fact paf %transaction !>(dat))
-        (kick paf)
-    ==
+    |_  [haz=block-hash tid=txid]
+    ++  sub  /transaction/[(scot %ux haz)]/[(scot %ux tid)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=transaction:update
+      ^-  (list card)
+      :~  (fact sub %transaction !>(dat))
+          end
+      ==
+    --
   ::
-  ++  fact  |=([paf=path cag=cage] [%give %fact ?-(for ~ paf^~, ^ ~) cag])
-  ++  kick  |=(paf=path [%give %kick paf^~ for])
+  ++  fact  |=([paf=path cag=cage] `card`[%give %fact ?-(for ~ paf^~, ^ ~) cag])
+  ++  kick  |=(paf=path `card`[%give %kick paf^~ for])
   ::
   --
 ::
@@ -616,8 +632,7 @@
                 haz
                 i.hash-reqs
           %-  emil
-          %+  ~(block-by-hash make-update ~)
-              haz
+          %-  ~(res ~(block-by-hash make-update ~) haz)
           :_  bok
           %:  make-block-info
               het
@@ -648,9 +663,7 @@
                 txs.bok  t.txs.bok
             ==
           %-  emil
-          %^  ~(transaction make-update ~)
-              haz
-              txid.i.hash-reqs
+          %-  ~(res ~(transaction make-update ~) haz txid.i.hash-reqs)
           ?~  txn  ~
           :_  txn
           %:  make-block-info
@@ -676,8 +689,7 @@
                 het
                 i.height-reqs
           %-  emil
-          %+  ~(block-by-height make-update ~)
-              het
+          %-  ~(res ~(block-by-height make-update ~) het)
           :_  bok
           %:  make-block-info
               het
@@ -744,8 +756,7 @@
                 haz
                 i.hash-reqs
           %-  emil
-          %+  ~(block-filter-by-hash make-update ~)
-              haz
+          %-  ~(res ~(block-filter-by-hash make-update ~) haz)
           :_  fil
           %:  make-block-info
               het
@@ -770,8 +781,7 @@
                 het
                 i.height-reqs
           %-  emil
-          %+  ~(block-filter-by-height make-update ~)
-              het
+          %-  ~(res ~(block-filter-by-height make-update ~) het)
           :_  fil
           %:  make-block-info
               het
@@ -915,8 +925,7 @@
                       het
                       i.height-reqs
                 %-  emil
-                %+  ~(block-header-by-height make-update ~)
-                    het
+                %-  ~(res ~(block-header-by-height make-update ~) het)
                 :_  hed
                 %:  make-block-info
                     het
@@ -1015,7 +1024,32 @@
         =.  is-synced  |
         %-  emit
         %~  is-synced  make-update  ~
-      :: TODO: kick all hash and height subscriptions and delete them from pending state
+      =.  cor
+        %-  emil
+        %-  ~(rep by pending-block-hash-reqs)
+        |=  [[key=block-hash val=(set pending-block-hash-req)] acc=(list card)]
+        %+  weld  acc
+        %+  turn  ~(tap in val)
+        |=  req=pending-block-hash-req
+        ?-  -.req
+            %block-filter  ~(end ~(block-filter-by-hash make-update ~) key)
+            %block         ~(end ~(block-by-hash make-update ~) key)
+            %transaction   ~(end ~(transaction make-update ~) key txid.req)
+        ==
+      =.  pending-block-hash-reqs  ~
+      =.  cor
+        %-  emil
+        %-  ~(rep by pending-block-height-reqs)
+        |=  [[key=block-height val=(set pending-block-height-req)] acc=(list card)]
+        %+  weld  acc
+        %+  turn  ~(tap in val)
+        |=  req=pending-block-height-req
+        ?-  -.req
+            %block-header  ~(end ~(block-header-by-height make-update ~) key)
+            %block-filter  ~(end ~(block-filter-by-height make-update ~) key)
+            %block         ~(end ~(block-by-height make-update ~) key)
+        ==
+      =.  pending-block-height-reqs  ~
       =.  cor
         %-  emil
         %+  turn  (tap:on-bh-index new-best-branch)
