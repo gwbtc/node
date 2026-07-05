@@ -149,6 +149,26 @@
         haz
         dat
   ::
+      [%block-header %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    ?:  (lte het block-height.best-block)
+      =/  haz  (got:on-bh-index bh-index het)
+      =/  hed  (~(got by block-headers) haz)
+      %-  emil
+      %+  ~(block-header-by-height make-update ~^src.bowl)
+          het
+      :_  block-header.hed
+      %:  make-block-info
+          het
+          haz
+          chainwork.hed
+      ==
+    =/  req  [%block-header ~]
+    ?:  (~(has ju pending-block-height-reqs) het req)  cor
+    %_  cor
+        pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+    ==
+  ::
       [%block-filter %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
     =/  hed  (~(get by block-headers) haz)
@@ -183,6 +203,37 @@
     :~  (make-getcfilters-message block-height.u.hed haz)
     ==
   ::
+      [%block-filter %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    ?:  (lte het block-height.best-block)
+      =/  haz  (got:on-bh-index bh-index het)
+      =/  hed  (~(got by block-headers) haz)
+      =/  fil  (~(get by filters) haz)
+      ?^  fil
+        %-  emil
+        %+  ~(block-filter-by-height make-update ~^src.bowl)
+            het
+        :_  u.fil
+        %:  make-block-info
+            het
+            haz
+            chainwork.hed
+        ==
+      =/  req  [%block-filter ~]
+      ?:  (~(has ju pending-block-height-reqs) het req)  cor
+      =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+      =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  (make-getcfilters-message het haz)
+      ==
+    =/  req  [%block-filter ~]
+    ?:  (~(has ju pending-block-height-reqs) het req)  cor
+    %_  cor
+        pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+    ==
+  ::
       [%block %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
     =/  hed  (~(get by block-headers) haz)
@@ -205,6 +256,27 @@
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
+    ==
+  ::
+      [%block %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    ?:  (lte het block-height.best-block)
+      =/  haz  (got:on-bh-index bh-index het)
+      =/  hed  (~(got by block-headers) haz)
+      :: TODO: check block cache
+      =/  req  [%block ~]
+      ?:  (~(has ju pending-block-height-reqs) het req)  cor
+      =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+      =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  [%getdata [%msg-witness-block haz] ~]
+      ==
+    =/  req  [%block ~]
+    ?:  (~(has ju pending-block-height-reqs) het req)  cor
+    %_  cor
+        pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
     ==
   ::
       [%transaction block-hash=@ta txid=@ta ~]
@@ -239,6 +311,7 @@
 ++  leave
   |=  poe=(pole @ta)
   ^+  cor
+  :: TODO: clean up pending req state on leave
   cor
 ::
 ++  fail
@@ -389,6 +462,14 @@
         (kick paf)
     ==
   ::
+  ++  block-header-by-height
+    |=  [het=block-height dat=block-header-by-height:update]
+    ^-  (list card)
+    =/  paf  /block-header/height/[(scot %ud het)]
+    :~  (fact paf %block-header-by-height !>(dat))
+        (kick paf)
+    ==
+  ::
   ++  block-filter-by-hash
     |=  [haz=block-hash dat=block-filter-by-hash:update]
     ^-  (list card)
@@ -397,11 +478,27 @@
         (kick paf)
     ==
   ::
+  ++  block-filter-by-height
+    |=  [het=block-height dat=block-filter-by-height:update]
+    ^-  (list card)
+    =/  paf  /block-filter/height/[(scot %ud het)]
+    :~  (fact paf %block-filter-by-height !>(dat))
+        (kick paf)
+    ==
+  ::
   ++  block-by-hash
     |=  [haz=block-hash dat=block-by-hash:update]
     ^-  (list card)
     =/  paf  /block/hash/[(scot %ux haz)]
     :~  (fact paf %block-by-hash !>(dat))
+        (kick paf)
+    ==
+  ::
+  ++  block-by-height
+    |=  [het=block-height dat=block-by-height:update]
+    ^-  (list card)
+    =/  paf  /block/height/[(scot %ud het)]
+    :~  (fact paf %block-by-height !>(dat))
         (kick paf)
     ==
   ::
@@ -511,9 +608,7 @@
       |-
       ?~  hash-reqs  cor
       =.  cor
-        ?-  -.i.hash-reqs
-        ::
-            %block-filter  cor
+        ?+  -.i.hash-reqs  cor
         ::
             %block
           =.  pending-block-hash-reqs
@@ -568,17 +663,32 @@
       %=  $
           hash-reqs  t.hash-reqs
       ==
-    :: TODO: handle height-reqs
-    :: =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
-    :: =.  cor
-    ::   |-
-    ::   ?~  height-reqs  cor
-    ::   =.  cor
-    ::     ?-  -.i.height-reqs
-    ::     ==
-    ::   %=  $
-    ::       height-reqs  t.height-reqs
-    ::   ==
+    =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+    =.  cor
+      |-
+      ?~  height-reqs  cor
+      =.  cor
+        ?+  -.i.height-reqs  cor
+        ::
+            %block
+          =.  pending-block-height-reqs
+            %+  ~(del ju pending-block-height-reqs)
+                het
+                i.height-reqs
+          %-  emil
+          %+  ~(block-by-height make-update ~)
+              het
+          :_  bok
+          %:  make-block-info
+              het
+              haz
+              wok
+          ==
+        ::
+        ==
+      %=  $
+          height-reqs  t.height-reqs
+      ==
     cor
   ::
       %cfilter
@@ -626,11 +736,7 @@
       |-
       ?~  hash-reqs  cor
       =.  cor
-        ?-  -.i.hash-reqs
-        ::
-            %block  cor
-        ::
-            %transaction  cor
+        ?+  -.i.hash-reqs  cor
         ::
             %block-filter
           =.  pending-block-hash-reqs
@@ -651,17 +757,32 @@
       %=  $
           hash-reqs  t.hash-reqs
       ==
-    :: TODO: handle height-reqs
-    :: =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
-    :: =.  cor
-    ::   |-
-    ::   ?~  height-reqs  cor
-    ::   =.  cor
-    ::     ?-  -.i.height-reqs
-    ::     ==
-    ::   %=  $
-    ::       height-reqs  t.height-reqs
-    ::   ==
+    =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+    =.  cor
+      |-
+      ?~  height-reqs  cor
+      =.  cor
+        ?+  -.i.height-reqs  cor
+        ::
+            %block-filter
+          =.  pending-block-height-reqs
+            %+  ~(del ju pending-block-height-reqs)
+                het
+                i.height-reqs
+          %-  emil
+          %+  ~(block-filter-by-height make-update ~)
+              het
+          :_  fil
+          %:  make-block-info
+              het
+              haz
+              wok
+          ==
+        ::
+        ==
+      %=  $
+          height-reqs  t.height-reqs
+      ==
     cor
   ::
       %cfheaders
@@ -687,6 +808,26 @@
       ==
     =/  haz  (got:on-bh-index bh-index het)
     =/  fed  (make-filter-header:b-fil pre i.filter-hashes.msg)
+    =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+    =.  cor
+      |-
+      ?~  height-reqs  cor
+      =.  cor
+        ?+  -.i.height-reqs  cor
+        ::
+            %block-filter
+          =/  req  [%block-filter ~]
+          =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+          %-  emit
+          %+  send:tcp  erp
+          %-  ~(write ne:b-ser network)
+          :~  (make-getcfilters-message het haz)
+          ==
+        ::
+        ==
+      %=  $
+          height-reqs  t.height-reqs
+      ==
     %=  $
         filter-hashes.msg   t.filter-hashes.msg
         pre                 fed
@@ -755,11 +896,48 @@
         =?  cor  is-new-best-block
           =.  best-block  [haz het wok]
           =.  bh-index    (put:on-bh-index bh-index het haz)
-          %-  emit
-          %-  ~(best-block make-update ~)
-          :+  %new
-              het
-              haz
+          =.  cor
+            %-  emit
+            %-  ~(best-block make-update ~)
+            :+  %new
+                het
+                haz
+          =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
+          =.  cor
+            |-
+            ?~  height-reqs  cor
+            =.  cor
+              ?+  -.i.height-reqs  cor
+              ::
+                  %block-header
+                =.  pending-block-height-reqs
+                  %+  ~(del ju pending-block-height-reqs)
+                      het
+                      i.height-reqs
+                %-  emil
+                %+  ~(block-header-by-height make-update ~)
+                    het
+                :_  hed
+                %:  make-block-info
+                    het
+                    haz
+                    wok
+                ==
+              ::
+                  %block
+                =/  req  [%block ~]
+                =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+                %-  emit
+                %+  send:tcp  erp
+                %-  ~(write ne:b-ser network)
+                :~  [%getdata [%msg-witness-block haz] ~]
+                ==
+              ::
+              ==
+            %=  $
+                height-reqs  t.height-reqs
+            ==
+          cor
         %=  $
             headers.msg  t.headers.msg
         ==
@@ -828,7 +1006,6 @@
         %=  $
             las  [nex u.nax]
         ==
-      :: TODO: kick all affected data request subscriptions
       =.  cor
         %-  emit
         %-  ~(best-block make-update ~)
@@ -838,6 +1015,7 @@
         =.  is-synced  |
         %-  emit
         %~  is-synced  make-update  ~
+      :: TODO: kick all hash and height subscriptions and delete them from pending state
       =.  cor
         %-  emil
         %+  turn  (tap:on-bh-index new-best-branch)

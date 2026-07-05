@@ -53,6 +53,24 @@
     %-  watch-light-client
         /transaction/[(scot %ux haz)]/[(scot %ux tid)]
   ::
+      %get-block-header-by-height
+    =/  het  !<(@ud vaz)
+    %-  emit
+    %-  watch-light-client
+        /block-header/height/[(scot %ud het)]
+  ::
+      %get-block-filter-by-height
+    =/  het  !<(@ud vaz)
+    %-  emit
+    %-  watch-light-client
+        /block-filter/height/[(scot %ud het)]
+  ::
+      %get-block-by-height
+    =/  het  !<(@ud vaz)
+    %-  emit
+    %-  watch-light-client
+        /block/height/[(scot %ud het)]
+  ::
   ==
 ::
 ++  peek
@@ -145,6 +163,39 @@
       cor
     =/  dat  !<(transaction:update q.cage.sin)
     ~&  >  dat
+    cor
+  ::
+      [%block-header %height *]
+    ?:  ?=(%kick -.sin)
+      ~&  >>  [%kick wir]
+      cor
+    ?.  ?=(%fact -.sin)
+      cor
+    =/  dat  !<(block-header-by-height:update q.cage.sin)
+    ~&  >  dat
+    cor
+  ::
+      [%block-filter %height *]
+    ?:  ?=(%kick -.sin)
+      ~&  >>  [%kick wir]
+      cor
+    ?.  ?=(%fact -.sin)
+      cor
+    =/  dat  !<(block-filter-by-height:update q.cage.sin)
+    ~&  >  -.dat
+    ~&  >  [%filter-wid wid.filter.dat]
+    cor
+  ::
+      [%block %height *]
+    ?:  ?=(%kick -.sin)
+      ~&  >>  [%kick wir]
+      cor
+    ?.  ?=(%fact -.sin)
+      cor
+    =/  dat  !<(block-by-height:update q.cage.sin)
+    ~&  >  -.dat
+    ~&  >  -.block.dat
+    ~&  >  [%txs (lent txs.block.dat)]
     cor
   ::
   ==
