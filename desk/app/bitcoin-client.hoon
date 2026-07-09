@@ -656,7 +656,6 @@
   ^+  cor
   =/  erd  (~(get by earth-peers) erp)
   ?~  erd  cor
-  =*  erd  u.erd
   =.  earth-peers  (~(del by earth-peers) erp)
   :: =.  cor
   ::   =/  mes  ~(tap in messages-pending-response.erd)
@@ -697,7 +696,7 @@
       ==
     ::
         %.n
-      =/  dat  [last-heard.erd services.erd]
+      =/  dat  [last-heard.u.erd services.u.erd]
       %_  cor
           earth-addresses  (~(put by earth-addresses) erp dat)
       ==
