@@ -5,18 +5,28 @@
     b-ser=bitcoin-serialization,
     b-fil=bitcoin-compact-block-filters
 |%
-+$  earth-peer
++$  net-params
+  $:  target-addresses=@ud
+      target-peers=@ud
+      required-peer-services=services:b-net
+  ==
++$  earth-addresses
+  %+  map
+      earth-address
+  $:  last-heard=time
+      =services:b-net
+  ==
++$  earth-address
   $:  net-id=network-address-id:b-net
       address=@ux
       port=@ud
   ==
++$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
-  $:  last-connected=time
-      starting-height=block-height
+  $:  starting-height=block-height
       =services:b-net
       buffer=hexb
   ==
-+$  earth-peers  (map earth-peer earth-peer-state)
 ::
 +$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
 +$  pending-block-height-reqs  (jug block-height pending-block-height-req)
@@ -43,7 +53,9 @@
 +$  state-0
   $:  =protocol-version:b-net
       =network:b-net
+      =net-params
       =earth-peers
+      =earth-addresses
       =pending-block-hash-reqs
       =pending-block-height-reqs
       =is-synced
@@ -77,36 +89,48 @@
   ?+  mak  ~|(bad-poke/mak !!) 
   ::
       %log-info
+    ~&       [%protocol-version protocol-version]
+    ~&       [%network network]
+    ~&       [%net-params net-params]
     ~&  >    [%best-block best-block]
+    ~&  >    [%is-synced is-synced]
     ~&  >    [%bh-index ~(wyt in bh-index)]
     ~&  >    [%headers ~(wyt in block-headers)]
     ~&  >>   [%best-filter-header best-filter-header]
     ~&  >>   [%filter-headers ~(wyt in filter-headers)]
     ~&  >>   [%filters ~(wyt in filters)]
-    ~&  >>>  [%earth-peers earth-peers]
     ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
-    ~&  >>>  [%is-synced is-synced]
+    ~&  >>>  [%earth-addresses ~(wyt in earth-addresses)]
+    ~&  >>>  [%earth-peers ~(wyt in earth-peers)]
     cor
   ::
-      %open-tcp
-    =/  erp  !<(earth-peer vaz)
-    ?:  .?(earth-peers)
-      ~&  >>>  [%more-than-one-peer-not-supported earth-peers]
+      %add-earth-peer
+    =/  erp  !<(earth-address vaz)
+    ?.  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
+      ~&  >>>  [%need-ipv4-or-ipv6 erp]
       !!
-    ?.  ?=(%ipv4 net-id.erp)
-      ~&  >>>  [%need-ipv4 erp]
-      !!
-    =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
-    %-  emil  (open:tcp erp)
+    =?  earth-addresses  !(~(has by earth-addresses) erp)
+      %+  ~(put by earth-addresses)
+          erp
+      :*  now.bowl
+          *services:b-net
+      ==
+    ?:  (~(has by earth-peers) erp)
+      ~&  >>  [%already-connected erp]
+      cor
+    %-  connect-to-peer
+        erp
   ::
-      %close-tcp
-    ?.  .?(earth-peers)
-      ~&  >>>  %no-connections
-      !!
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
-    =.  earth-peers  ~
-    %-  emil  (close:tcp erp)
+      %kill-peer-connections
+    =/  pes  ~(tap by earth-peers)
+    |-
+    ?~  pes  cor
+    =.  cor  (emil (close:tcp p.i.pes))
+    %=  $
+        pes  t.pes
+        earth-peers  (~(del by earth-peers) p.i.pes)
+    ==
   ::
   ==
 ::
@@ -191,9 +215,10 @@
     =/  req  [%block-filter ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    =/  som  get-some-peer
+    ?~  som  !!
     %-  emit
-    %+  send:tcp  erp
+    %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
     :~  (make-getcfilters-message block-height.u.hed haz)
     ==
@@ -216,9 +241,10 @@
       =/  req  [%block-filter ~]
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
-      =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+      =/  som  get-some-peer
+      ?~  som  !!
       %-  emit
-      %+  send:tcp  erp
+      %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
       :~  (make-getcfilters-message het haz)
       ==
@@ -243,9 +269,10 @@
     =/  req  [%block ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    =/  som  get-some-peer
+    ?~  som  !!
     %-  emit
-    %+  send:tcp  erp
+    %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -259,9 +286,10 @@
       =/  req  [%block ~]
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
-      =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+      =/  som  get-some-peer
+      ?~  som  !!
       %-  emit
-      %+  send:tcp  erp
+      %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
       :~  [%getdata [%msg-witness-block haz] ~]
       ==
@@ -287,9 +315,10 @@
     =/  req  [%transaction tid]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
-    =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
+    =/  som  get-some-peer
+    ?~  som  !!
     %-  emit
-    %+  send:tcp  erp
+    %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -330,9 +359,8 @@
     ?-  -.gif
     ::
         %receive
-      :: ~&  >  %tcp-receive
+      :: ~&  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
-      =.  last-connected.erd  now.bowl
       =.  earth-peers  (~(put by earth-peers) erp erd)
       |-
       ?~  mes  cor
@@ -357,6 +385,7 @@
     ::
         %error
       ~&  >>>  [%tcp-error msg.gif]
+      :: TODO: disconnect peer
       cor
     ::
     ==
@@ -531,18 +560,95 @@
   ::
   --
 ::
+++  en-earth-time
+  |=  tim=time
+  %+  div
+      (sub tim ~1970.1.1)
+      ~s1
+::
+++  de-earth-time
+  |=  ert=@ud
+  %-  from-unix:chrono:userlib
+      ert
+::
 ++  en-earth-peer-path
-  |=  erp=earth-peer
+  |=  erp=earth-address
   ^-  path
   /[net-id.erp]/[(scot %ux address.erp)]/[(scot %ud port.erp)]
 ::
 ++  de-earth-peer-path
   |=  paf=path
-  ^-  earth-peer
+  ^-  earth-address
   ?>  ?=([@ @ @ ~] paf)
   :*  (network-address-id:b-net i.paf)
       (slav %ux i.t.paf)
       (slav %ud i.t.t.paf)
+  ==
+::
+++  peer-services-are-sufficient
+  |=  ser=services:b-net
+  ^-  ?
+  =*  req  required-peer-services.net-params
+  ?&  ?:(node-network.req node-network.ser &)
+      ?:(node-bloom.req node-bloom.ser &)
+      ?:(node-witness.req node-witness.ser &)
+      ?:(node-compact-filters.req node-compact-filters.ser &)
+      ?:(node-network-limited.req node-network-limited.ser &)
+      ?:(node-p2p-v2.req node-p2p-v2.ser &)
+  ==
+::
+++  get-n-new-addresses
+  |=  num=@ud
+  ^-  (list earth-address)
+  =/  ads  (~(dif in ~(key by earth-addresses)) ~(key by earth-peers))
+  =/  siz  ~(wyt in ads)
+  =/  rng  ~(. og eny.bowl)
+  |-
+  ?:  =(0 siz)  ~
+  ?:  =(0 num)  ~
+  =^  ind  rng  (rads:rng siz)
+  =/  adr  (snag ind ~(tap in ads))
+  :-  adr
+  %=  $
+      num  (dec num)
+      siz  (dec siz)
+      ads  (~(del in ads) adr)
+  ==
+::
+++  get-some-peer
+  ^-  (unit earth-address)
+  =/  pes  ~(key by earth-peers)
+  =/  siz  ~(wyt in pes)
+  ?:  =(0 siz)  ~
+  =/  ind  (~(rad og eny.bowl) siz)
+  :-  ~
+  %+  snag
+      ind
+      ~(tap in pes)
+::
+++  connect-to-peer
+  |=  erp=earth-address
+  ^+  cor
+  ?<  (~(has by earth-peers) erp)
+  ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
+  =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
+  %-  emil
+  %+  open:tcp
+      erp
+  %-  ~(write ne:b-ser network)
+      make-connect-messages
+::
+++  connect-to-more-peers
+  ^+  cor
+  =*  target  target-peers.net-params
+  =/  num-peers  ~(wyt in earth-peers)
+  ?:  (gte num-peers target)  cor
+  =/  ads  (get-n-new-addresses (sub target num-peers))
+  |-
+  ?~  ads  cor
+  =.  cor  (connect-to-peer i.ads)
+  %=  $
+      ads  t.ads
   ==
 ::
 ++  make-connect-messages
@@ -552,7 +658,7 @@
   =/  ver  *version-payload:b-net
   %_  ver
       version     protocol-version
-      time        (div (sub now.bowl ~1970.1.1) ~s1)
+      time        (en-earth-time now.bowl)
       user-agent  'urbit'
   ==
 ::
@@ -573,11 +679,12 @@
   [%getcfilters 0 start stop]
 ::
 ++  handle-message
-  |=  [[erp=earth-peer erd=earth-peer-state] msg=message:b-net]
+  |=  [[erp=earth-address erd=earth-peer-state] msg=message:b-net]
   ^+  cor
   ?+  -.msg  cor
   ::
       %version
+    ~&  >  msg
     =:  services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
@@ -585,8 +692,10 @@
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
-    :~  [%verack ~]
+    :+  [%verack ~]
         [%getheaders make-block-locator ~]
+    ?:  (gte ~(wyt in earth-addresses) target-addresses.net-params)  ~
+    :~  [%getaddr ~]
     ==
   ::
       %ping
@@ -596,12 +705,48 @@
     :~  [%pong nonce.msg]
     ==
   ::
-      %addrv2
-    ~&  >>  [%addresses (lent addresses.msg)]
+      %addr
+    ~&  >>  [%addr (lent addresses.msg)]
+    :: TODO: save as addrv2
     cor
   ::
+      %addrv2
+    ~&  >>  [%addrv2 (lent addresses.msg)]
+    :: save any new addresses which meet our required services
+    =.  cor
+      |-
+      ?~  addresses.msg  cor
+      =*  adr  i.addresses.msg
+      =?  earth-addresses
+          ?&  (peer-services-are-sufficient services.adr)
+              |(?=(%ipv4 id.adr) ?=(%ipv6 id.adr))
+          ==
+        =/  tim  (de-earth-time time.adr)
+        =/  new  [id.adr address.adr port.adr]
+        =/  aud  (~(get by earth-addresses) new)
+        %+  ~(put by earth-addresses)
+            new
+        ?~  aud  [tim services.adr]
+        ?:  (lte tim last-heard.u.aud)  u.aud
+        :-  tim
+            services.adr
+      %=  $
+          addresses.msg  t.addresses.msg
+      ==
+    =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
+    :: if we still lack addresses, get more from some peer
+    =/  num-addrs  ~(wyt in earth-addresses)
+    ?:  (gte num-addrs target-addresses.net-params)  cor
+    =/  som  get-some-peer
+    ?~  som  cor
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  [%getaddr ~]
+    ==
+  ::
       %inv
-    ~&  >>  [%inv type:(rear inventory.msg)]
+    ~&  >>  %inv
     :: TODO: handle block invs by sending getheaders
     cor
   ::
@@ -811,8 +956,10 @@
         =.  is-synced  &
         %-  emit
         %~  is-synced  make-update  ~
+      =/  som  get-some-peer
+      ?~  som  cor
       %-  emit
-      %+  send:tcp  erp
+      %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
       :~  make-getcfheaders-message
       ==
@@ -826,10 +973,11 @@
         ?+  -.i.height-reqs  cor
         ::
             %block-filter
+          =/  som  get-some-peer
+          ?~  som  cor
           =/  req  [%block-filter ~]
-          =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
           %-  emit
-          %+  send:tcp  erp
+          %+  send:tcp  u.som
           %-  ~(write ne:b-ser network)
           :~  (make-getcfilters-message het haz)
           ==
@@ -847,6 +995,7 @@
     ==
   ::
       %headers
+    ~&  >>  [%headers-from erp]
     :: current heuristic for determining if block headers are synced:
     :: keep requesting headers until a headers response is null  :: TODO: improve this
     ?.  .?(headers.msg)
@@ -857,15 +1006,19 @@
         %~  is-synced  make-update  ~
       :: if block headers are caught up and filter headers aren't,
       :: get filter headers
+      =/  som  get-some-peer
+      ?~  som  cor
       %-  emit
-      %+  send:tcp  erp
+      %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
       :~  make-getcfheaders-message
       ==
     |-
     ?~  headers.msg
+      =/  som  get-some-peer
+      ?~  som  cor
       %-  emit
-      %+  send:tcp  erp
+      %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
       :~  [%getheaders make-block-locator ~]
       ==
@@ -874,7 +1027,9 @@
     ?-  -.val
     ::
         %redundant
-      ~&  [%redundant-block-header block-hash.val]
+      ?:  =(~ t.headers.msg)
+        ~&  >>>  %redundant-block-headers
+        cor
       %=  $
           headers.msg  t.headers.msg
       ==
@@ -934,10 +1089,11 @@
                 ==
               ::
                   %block
+                =/  som  get-some-peer
+                ?~  som  cor
                 =/  req  [%block ~]
-                =/  erp  `earth-peer`p:(rear ~(tap by earth-peers))
                 %-  emit
-                %+  send:tcp  erp
+                %+  send:tcp  u.som
                 %-  ~(write ne:b-ser network)
                 :~  [%getdata [%msg-witness-block haz] ~]
                 ==
@@ -1087,19 +1243,18 @@
     ==
   ::
   ++  open
-    |=  erp=earth-peer
+    |=  [erp=earth-address dat=octs]
     ^-  (list card)
-    ?>  ?=(%ipv4 net-id.erp)
+    ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
     =/  paf  (en-earth-peer-path erp)
     =/  sid  (weld /tcp paf)
-    =/  dat  (~(write ne:b-ser network) make-connect-messages)
     :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp]])]
         [%pass sid %agent [our.bowl %tcp] %watch sid]
         (send erp dat)
     ==
   ::
   ++  close
-    |=  erp=earth-peer
+    |=  erp=earth-address
     ^-  (list card)
     =/  paf  (en-earth-peer-path erp)
     =/  sid  (weld /tcp paf)
@@ -1108,7 +1263,7 @@
     ==
   ::
   ++  send
-    |=  [erp=earth-peer dat=octs]
+    |=  [erp=earth-address dat=octs]
     ^-  card
     =/  paf  (en-earth-peer-path erp)
     =/  sid  (weld /tcp paf)
@@ -1126,6 +1281,14 @@
   =*  haz  block-hash.val
   =*  het  block-height.val
   =*  wok  chainwork.val
+  =.  net-params
+    %_  net-params
+        target-addresses  100
+        target-peers      5
+        node-network.required-peer-services          &
+        node-witness.required-peer-services          &
+        node-compact-filters.required-peer-services  &
+    ==
   %_  cor
       network        %mainnet
   ::
@@ -1153,6 +1316,7 @@
     ?-  -.u.old
       %0  cor(state u.old)
     ==
+  =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
   cor
 ::
 --

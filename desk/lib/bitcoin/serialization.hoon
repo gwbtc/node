@@ -223,7 +223,9 @@
     =.  en-core  (en-prep 4 time.adr)
     =.  en-core  (en-compactsize dat:en-abet:(en-network-services:en services.adr))
     =.  en-core  (en-network-address-id id.adr)
-    =.  en-core  (en-prep (address-id-to-size:network-helpers id.adr) address.adr)
+    =/  siz      (address-id-to-size:network-helpers id.adr)
+    =.  en-core  (en-compactsize siz)
+    =.  en-core  (en-prep siz address.adr)
     =.  en-core  (en-prep 2 port.adr)
         en-core
   ::
@@ -682,7 +684,8 @@
     =^  time      de-core  (de-read 4)
     =^  ser-bits  de-core  de-compactsize
     =^  addr-id   de-core  de-network-address-id
-    =^  address   de-core  (de-read (address-id-to-size:network-helpers addr-id))
+    =^  siz       de-core  de-compactsize
+    =^  address   de-core  (de-read siz)
     =^  port      de-core  (de-read 2)
     :_  de-core
     :*  time
@@ -742,7 +745,7 @@
     =*  nek  network.hed
     =*  siz  payload-size.hed
     =*  typ  command.hed
-    ?+  typ  ~^+:(de-read:de-core siz)
+    ?+  typ  ~^+:(de-read:de-core siz)  :: TODO: virtualize the payload deserialization and produce null + consume payload bytes on crash
     ::
         %version
       =^  version   de-core  (de-read 4)
