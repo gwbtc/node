@@ -736,6 +736,42 @@
   ^-  message:b-net
   [%getcfilters 0 start stop]
 ::
+++  handle-addrv2
+  |=  ads=(list address-v2:b-net)
+  ^+  cor
+  =.  cor
+    |-
+    ?~  ads  cor
+    =*  adr  i.ads
+    =/  erp  [id.adr address.adr port.adr]
+    =?  earth-addresses
+        ?&  (peer-services-are-sufficient services.adr)
+            |(?=(%ipv4 id.adr) ?=(%ipv6 id.adr))
+            !(~(has by blacklist) erp)
+        ==
+      =/  tim  (de-earth-time time.adr)
+      =/  erd  (~(get by earth-addresses) erp)
+      %+  ~(put by earth-addresses)
+          erp
+      ?~  erd  [tim services.adr]
+      ?:  (lte tim last-heard.u.erd)  u.erd
+      :-  tim
+          services.adr
+    %=  $
+        ads  t.ads
+    ==
+  =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
+  :: if we still lack addresses, get more from some peer
+  =/  num-addrs  ~(wyt in earth-addresses)
+  ?:  (gte num-addrs target-addresses.net-params)  cor
+  =/  som  get-some-peer
+  ?~  som  cor
+  %-  emit
+  %+  send:tcp  u.som
+  %-  ~(write ne:b-ser network)
+  :~  [%getaddr ~]
+  ==
+::
 ++  handle-message
   |=  [[erp=earth-address erd=earth-peer-state] msg=message:b-net]
   ^+  cor
@@ -772,44 +808,22 @@
       %addr
     ~&  >>  [%addr (lent addresses.msg)]
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
-    :: TODO: save as addrv2
-    cor
+    %-  handle-addrv2
+    %+  turn  addresses.msg
+    |=  adr=address-v1:b-net
+    ^-  address-v2:b-net
+    :*  time.adr
+        services.adr
+        %ipv6
+        `@`ip.adr
+        port.adr
+    ==
   ::
       %addrv2
     ~&  >>  [%addrv2 (lent addresses.msg)]
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
-    :: save any new addresses which meet our required services
-    =.  cor
-      |-
-      ?~  addresses.msg  cor
-      =*  adr  i.addresses.msg
-      =?  earth-addresses
-          ?&  (peer-services-are-sufficient services.adr)
-              |(?=(%ipv4 id.adr) ?=(%ipv6 id.adr))
-          ==
-        =/  tim  (de-earth-time time.adr)
-        =/  new  [id.adr address.adr port.adr]
-        =/  aud  (~(get by earth-addresses) new)
-        %+  ~(put by earth-addresses)
-            new
-        ?~  aud  [tim services.adr]
-        ?:  (lte tim last-heard.u.aud)  u.aud
-        :-  tim
-            services.adr
-      %=  $
-          addresses.msg  t.addresses.msg
-      ==
-    =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
-    :: if we still lack addresses, get more from some peer
-    =/  num-addrs  ~(wyt in earth-addresses)
-    ?:  (gte num-addrs target-addresses.net-params)  cor
-    =/  som  get-some-peer
-    ?~  som  cor
-    %-  emit
-    %+  send:tcp  u.som
-    %-  ~(write ne:b-ser network)
-    :~  [%getaddr ~]
-    ==
+    %-  handle-addrv2
+        addresses.msg
   ::
       %inv
     ~&  >>  %inv
