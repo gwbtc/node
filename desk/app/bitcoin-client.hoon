@@ -9,6 +9,7 @@
   $:  target-addresses=@ud
       target-peers=@ud
       required-peer-services=services:b-net
+      blacklist-expiration=@dr
   ==
 +$  earth-addresses
   %+  map
@@ -24,9 +25,12 @@
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
   $:  starting-height=block-height
+      last-heard=time
       =services:b-net
+      :: messages-pending-response=(set message:b-net)  :: TODO: contemplate this
       buffer=hexb
   ==
++$  blacklist  (map earth-address time)
 ::
 +$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
 +$  pending-block-height-reqs  (jug block-height pending-block-height-req)
@@ -56,6 +60,7 @@
       =net-params
       =earth-peers
       =earth-addresses
+      =blacklist
       =pending-block-hash-reqs
       =pending-block-height-reqs
       =is-synced
@@ -360,6 +365,7 @@
     ::
         %receive
       :: ~&  %tcp-receive
+      =.  last-heard.erd  now.bowl
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =.  earth-peers  (~(put by earth-peers) erp erd)
       |-
@@ -376,17 +382,11 @@
     ::
         %closed
       ~&  >>>  %tcp-closed
-      =.  earth-peers  (~(del by earth-peers) erp)
-      ?~  earth-peers
-        =.  is-synced  |
-        %-  emit
-        %~  is-synced  make-update  ~
-      cor
+      %+  disconnect-peer  |  erp
     ::
         %error
       ~&  >>>  [%tcp-error msg.gif]
-      :: TODO: disconnect peer
-      cor
+      %+  disconnect-peer  &  erp
     ::
     ==
   ::
@@ -651,6 +651,65 @@
       ads  t.ads
   ==
 ::
+++  disconnect-peer
+  |=  [ban=? erp=earth-address]
+  ^+  cor
+  =/  erd  (~(get by earth-peers) erp)
+  ?~  erd  cor
+  =*  erd  u.erd
+  =.  earth-peers  (~(del by earth-peers) erp)
+  :: =.  cor
+  ::   =/  mes  ~(tap in messages-pending-response.erd)
+  ::   |-
+  ::   ?~  mes  cor
+  ::   ?.  ?|  ?=(%getdata -.i.mes)
+  ::           ?=(%getblocks -.i.mes)
+  ::           ?=(%getheaders -.i.mes)
+  ::           ?=(%getaddr -.i.mes)
+  ::           ?=(%getcfilters -.i.mes)
+  ::           ?=(%getcfheaders -.i.mes)
+  ::           ?=(%getcfcheckpt -.i.mes)
+  ::       ==
+  ::     %=  $
+  ::         mes  t.mes
+  ::     ==
+  ::   =/  som  get-some-peer  :: TODO: if there are no peers, these messages will get dropped...
+  ::   ?~  som  cor
+  ::   =/  sod  (~(got by earth-peers) u.som)
+  ::   =.  sod  (~(put in sod) i.mes)
+  ::   =.  cor
+  ::     =.  earth-peers  (~(put by earth-peers) u.som sod)
+  ::     %-  emit
+  ::     %+  send:tcp  u.som
+  ::     %-  ~(write ne:b-ser network)
+  ::     :~  i.mes
+  ::     ==
+  ::   %=  $
+  ::       mes  t.mes
+  ::   ==
+  =.  cor
+    ?-  ban
+    ::
+        %.y
+      %_  cor
+          blacklist        (~(put by blacklist) erp now.bowl)
+          earth-addresses  (~(del by earth-addresses) erp)
+      ==
+    ::
+        %.n
+      =/  dat  [last-heard.erd services.erd]
+      %_  cor
+          earth-addresses  (~(put by earth-addresses) erp dat)
+      ==
+    ::
+    ==
+  =.  cor  connect-to-more-peers
+  ?~  earth-peers   :: TODO: improve / remove sync state
+    =.  is-synced  |
+    %-  emit
+    %~  is-synced  make-update  ~
+  cor
+::
 ++  make-connect-messages
   ^-  (list message:b-net)
   =-  [- [%sendheaders ~] [%sendaddrv2 ~] ~]
@@ -685,6 +744,12 @@
   ::
       %version
     ~&  >  msg
+    ?.  ?&  =(version.msg protocol-version)
+            (peer-services-are-sufficient services.msg)
+        ==
+      %+  disconnect-peer
+          &
+          erp
     =:  services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
@@ -707,11 +772,13 @@
   ::
       %addr
     ~&  >>  [%addr (lent addresses.msg)]
+    ?:  =(~ addresses.msg)  (disconnect-peer & erp)
     :: TODO: save as addrv2
     cor
   ::
       %addrv2
     ~&  >>  [%addrv2 (lent addresses.msg)]
+    ?:  =(~ addresses.msg)  (disconnect-peer & erp)
     :: save any new addresses which meet our required services
     =.  cor
       |-
@@ -761,7 +828,9 @@
     =/  mer  (make-merkle-root:b-val +.bok)
     ?.  =(mer merkle-root.block-header.hed)
       ~&  >>>  %block-merkle-root-verification-fail
-      !!
+      %+  disconnect-peer
+          &
+          erp
     :: update any subscriptions pending this block
     :: TODO: cache block
     =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
@@ -884,7 +953,9 @@
           fil
     ?.  =(fed this-filter-header)
       ~&  >>>  %block-filter-verification-fail
-      !!
+      %+  disconnect-peer
+          &
+          erp
     :: cache the block filter
     =.  filters  (~(put by filters) haz fil)
     :: update any subscriptions pending this block filter
@@ -1044,7 +1115,9 @@
     ::
         %invalid
       ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
-      cor
+      %+  disconnect-peer
+          &
+          erp
     ::
         %valid
       =*  haz  block-hash.val
@@ -1283,11 +1356,12 @@
   =*  wok  chainwork.val
   =.  net-params
     %_  net-params
-        target-addresses  100
+        target-addresses  500
         target-peers      5
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
+        blacklist-expiration  ~d5
     ==
   %_  cor
       network        %mainnet
