@@ -10,6 +10,7 @@
       target-peers=@ud
       required-peer-services=services:b-net
       blacklist-expiration=@dr
+      blacklist-interval=@dr
       ping-interval=@dr
   ==
 +$  earth-addresses
@@ -107,8 +108,9 @@
     ~&  >>   [%filters ~(wyt in filters)]
     ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
-    ~&  >>>  [%earth-addresses ~(wyt in earth-addresses)]
-    ~&  >>>  [%earth-peers ~(wyt in earth-peers)]
+    ~&   >   [%earth-peers ~(wyt in earth-peers)]
+    ~&   >   [%earth-addresses ~(wyt in earth-addresses)]
+    ~&   >   [%blacklist ~(wyt in blacklist)]
     cor
   ::
       %add-earth-peer
@@ -366,6 +368,15 @@
     :~  [%ping nun]
     ==
   ::
+      [%timer %blacklist ~]
+    =.  blacklist
+      %-  ~(rep by blacklist)
+      |=  [[key=earth-address val=time] acc=^blacklist]
+      ?:  (gte (sub now.bowl val) blacklist-expiration.net-params)  acc
+      %+  ~(put by acc)  key  val
+    %-  emit
+        set-blacklist-timer
+  ::
   ==
 ::
 ++  agent
@@ -599,6 +610,13 @@
   %~  set
       timer
   %+  weld  /timer/earth-peer  (en-earth-peer-path erp)
+::
+++  set-blacklist-timer
+  ^-  card
+  %.  blacklist-interval:net-params
+  %~  set
+      timer
+      /timer/blacklist
 ::
 ++  en-earth-time
   |=  tim=time
@@ -1394,8 +1412,10 @@
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
         blacklist-expiration  ~d3
+        blacklist-interval    ~d1
         ping-interval         ~m2
     ==
+  =.  cor  (emit set-blacklist-timer)
   %_  cor
       network        %mainnet
   ::
