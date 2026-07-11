@@ -10,6 +10,7 @@
       target-peers=@ud
       required-peer-services=services:b-net
       blacklist-expiration=@dr
+      ping-interval=@dr
   ==
 +$  earth-addresses
   %+  map
@@ -25,9 +26,9 @@
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
   $:  starting-height=block-height
-      last-heard=time
       =services:b-net
-      :: messages-pending-response=(set message:b-net)  :: TODO: contemplate this
+      last-heard=time
+      outbound-ping=(unit [=time nonce=@ux])
       buffer=hexb
   ==
 +$  blacklist  (map earth-address time)
@@ -346,8 +347,24 @@
   ^+  cor
   ?+  wir  cor
   ::
-      ~
-    cor
+      [%timer %earth-peer earth-peer=*]
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    =/  erd  (~(get by earth-peers) erp)
+    ?~  erd  cor
+    ?.  ?=([%behn %wake *] sin)  cor
+    :: if the previous ping hasn't been answered, disconnect and ban
+    ?:  .?(outbound-ping.u.erd)
+      %+  disconnect-peer  &  erp
+    =/  nun  (~(rad og eny.bowl) (lsh [3 8] 1))
+    =.  outbound-ping.u.erd  [~ now.bowl nun]
+    =.  earth-peers  (~(put by earth-peers) erp u.erd)
+    %-  emil
+    :-  (set-ping-timer erp)
+    %+  open:tcp
+        erp
+    %-  ~(write ne:b-ser network)
+    :~  [%ping nun]
+    ==
   ::
   ==
 ::
@@ -560,6 +577,29 @@
   ::
   --
 ::
+++  timer
+  |_  wir=wire
+  ++  set
+    |=  dur=@dr
+    =/  wen  (add now.bowl dur)
+    ^-  card
+    :*  %pass  wir  %arvo  %b  %wait  wen
+    ==
+  ++  end
+    |=  wen=time
+    ^-  card
+    :*  %pass  wir  %arvo  %b  %rest  wen
+    ==
+  --
+::
+++  set-ping-timer
+  |=  erp=earth-address
+  ^-  card
+  %.  ping-interval:net-params
+  %~  set
+      timer
+  %+  weld  /timer/earth-peer  (en-earth-peer-path erp)
+::
 ++  en-earth-time
   |=  tim=time
   %+  div
@@ -633,6 +673,7 @@
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
   =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
   %-  emil
+  :-  (set-ping-timer erp)
   %+  open:tcp
       erp
   %-  ~(write ne:b-ser network)
@@ -657,35 +698,6 @@
   =/  erd  (~(get by earth-peers) erp)
   ?~  erd  cor
   =.  earth-peers  (~(del by earth-peers) erp)
-  :: =.  cor
-  ::   =/  mes  ~(tap in messages-pending-response.erd)
-  ::   |-
-  ::   ?~  mes  cor
-  ::   ?.  ?|  ?=(%getdata -.i.mes)
-  ::           ?=(%getblocks -.i.mes)
-  ::           ?=(%getheaders -.i.mes)
-  ::           ?=(%getaddr -.i.mes)
-  ::           ?=(%getcfilters -.i.mes)
-  ::           ?=(%getcfheaders -.i.mes)
-  ::           ?=(%getcfcheckpt -.i.mes)
-  ::       ==
-  ::     %=  $
-  ::         mes  t.mes
-  ::     ==
-  ::   =/  som  get-some-peer  :: TODO: if there are no peers, these messages will get dropped...
-  ::   ?~  som  cor
-  ::   =/  sod  (~(got by earth-peers) u.som)
-  ::   =.  sod  (~(put in sod) i.mes)
-  ::   =.  cor
-  ::     =.  earth-peers  (~(put by earth-peers) u.som sod)
-  ::     %-  emit
-  ::     %+  send:tcp  u.som
-  ::     %-  ~(write ne:b-ser network)
-  ::     :~  i.mes
-  ::     ==
-  ::   %=  $
-  ::       mes  t.mes
-  ::   ==
   =.  cor
     ?-  ban
     ::
@@ -803,6 +815,13 @@
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
     :~  [%pong nonce.msg]
+    ==
+  ::
+      %pong
+    ?~  outbound-ping.erd  cor
+    ?.  =(nonce.msg nonce.u.outbound-ping.erd)  cor
+    %_  cor
+        earth-peers  (~(put by earth-peers) erp erd(outbound-ping ~))
     ==
   ::
       %addr
@@ -1370,11 +1389,12 @@
   =.  net-params
     %_  net-params
         target-addresses  500
-        target-peers      5
+        target-peers      10
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
-        blacklist-expiration  ~d5
+        blacklist-expiration  ~d3
+        ping-interval         ~m2
     ==
   %_  cor
       network        %mainnet
