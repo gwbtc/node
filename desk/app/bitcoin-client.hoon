@@ -12,6 +12,7 @@
       blacklist-expiration=@dr
       blacklist-interval=@dr
       ping-interval=@dr
+      pending-req-retry-interval=@dr
   ==
 +$  earth-addresses
   %+  map
@@ -223,6 +224,7 @@
     =/  req  [%block-filter ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
+    =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
     ?~  som  !!
     %-  emit
@@ -249,6 +251,7 @@
       =/  req  [%block-filter ~]
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+      =.  cor  (emit (set-pending-block-height-req-timer het req))
       =/  som  get-some-peer
       ?~  som  !!
       %-  emit
@@ -277,6 +280,7 @@
     =/  req  [%block ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
+    =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
     ?~  som  !!
     %-  emit
@@ -294,6 +298,7 @@
       =/  req  [%block ~]
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+      =.  cor  (emit (set-pending-block-height-req-timer het req))
       =/  som  get-some-peer
       ?~  som  !!
       %-  emit
@@ -323,6 +328,7 @@
     =/  req  [%transaction tid]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
+    =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
     ?~  som  !!
     %-  emit
@@ -366,6 +372,62 @@
         erp
     %-  ~(write ne:b-ser network)
     :~  [%ping nun]
+    ==
+  ::
+      [%timer %pending-req %block %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.wir)
+    :: TODO: make less janky
+    ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter])  cor
+    =.  cor  (emit (set-pending-block-hash-req-timer haz [%block ~]))
+    =/  som  get-some-peer
+    ?~  som  cor
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  [%getdata [%msg-witness-block haz] ~]
+    ==
+  ::
+      [%timer %pending-req %block-filter %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.wir)
+    =/  hed  (~(got by block-headers) haz)
+    =/  req  [%block-filter ~]
+    ?.  (~(has ju pending-block-hash-reqs) haz req)  cor
+    =.  cor  (emit (set-pending-block-hash-req-timer haz req))
+    =/  som  get-some-peer
+    ?~  som  cor
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  (make-getcfilters-message block-height.hed haz)
+    ==
+  ::
+      [%timer %pending-req %block %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.wir)
+    =/  haz  (got:on-bh-index bh-index het)
+    :: TODO: make less janky
+    ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter])  cor
+    =.  cor  (emit (set-pending-block-height-req-timer het [%block ~]))
+    =/  som  get-some-peer
+    ?~  som  cor
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  [%getdata [%msg-witness-block haz] ~]
+    ==
+  ::
+      [%timer %pending-req %block-filter %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.wir)
+    =/  haz  (got:on-bh-index bh-index het)
+    =/  hed  (~(got by block-headers) haz)
+    =/  req  [%block-filter ~]
+    ?.  (~(has ju pending-block-height-reqs) het req)  cor
+    =.  cor  (emit (set-pending-block-height-req-timer het req))
+    =/  som  get-some-peer
+    ?~  som  cor
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  (make-getcfilters-message het haz)
     ==
   ::
       [%timer %blacklist ~]
@@ -617,6 +679,30 @@
   %~  set
       timer
       /timer/blacklist
+::
+++  set-pending-block-hash-req-timer
+  |=  [haz=block-hash req=pending-block-hash-req]
+  ^-  card
+  %.  pending-req-retry-interval:net-params
+  %~  set
+      timer
+  ?+  -.req
+    /timer/pending-req/block/hash/[(scot %ux haz)]
+      %block-filter
+    /timer/pending-req/block-filter/hash/[(scot %ux haz)]
+  ==
+::
+++  set-pending-block-height-req-timer
+  |=  [het=block-height req=pending-block-height-req]
+  ^-  card
+  %.  pending-req-retry-interval:net-params
+  %~  set
+      timer
+  ?+  -.req
+    /timer/pending-req/block/height/[(scot %ud het)]
+      %block-filter
+    /timer/pending-req/block-filter/height/[(scot %ud het)]
+  ==
 ::
 ++  en-earth-time
   |=  tim=time
@@ -1097,6 +1183,7 @@
           =/  som  get-some-peer
           ?~  som  cor
           =/  req  [%block-filter ~]
+          =.  cor  (emit (set-pending-block-height-req-timer het req))
           %-  emit
           %+  send:tcp  u.som
           %-  ~(write ne:b-ser network)
@@ -1215,6 +1302,7 @@
                 =/  som  get-some-peer
                 ?~  som  cor
                 =/  req  [%block ~]
+                =.  cor  (emit (set-pending-block-height-req-timer het req))
                 %-  emit
                 %+  send:tcp  u.som
                 %-  ~(write ne:b-ser network)
@@ -1414,6 +1502,7 @@
         blacklist-expiration  ~d3
         blacklist-interval    ~d1
         ping-interval         ~m2
+        pending-req-retry-interval  ~s15
     ==
   =.  cor  (emit set-blacklist-timer)
   %_  cor
