@@ -8,6 +8,7 @@
 +$  net-params
   $:  target-addresses=@ud
       target-peers=@ud
+      minimum-peer-protocol-version=@ud
       required-peer-services=services:b-net
       blacklist-expiration=@dr
       blacklist-interval=@dr
@@ -27,7 +28,8 @@
   ==
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
-  $:  starting-height=block-height
+  $:  handshake-done=_|
+      starting-height=block-height
       =services:b-net
       last-heard=time
       outbound-ping=(unit [=time nonce=@ux])
@@ -48,8 +50,6 @@
       [%block ~]
   ==
 ::
-+$  is-synced  _|
-::
 +$  best-block  [=block-hash =block-height =chainwork]
 +$  bh-index    ((mop block-height block-hash) lth)
 ::
@@ -66,7 +66,6 @@
       =blacklist
       =pending-block-hash-reqs
       =pending-block-height-reqs
-      =is-synced
       =best-block
       =bh-index
       =best-filter-header
@@ -100,8 +99,8 @@
     ~&       [%protocol-version protocol-version]
     ~&       [%network network]
     ~&       [%net-params net-params]
+    ~&  >    [%is-synced is-fully-synced]
     ~&  >    [%best-block best-block]
-    ~&  >    [%is-synced is-synced]
     ~&  >    [%bh-index ~(wyt in bh-index)]
     ~&  >    [%headers ~(wyt in block-headers)]
     ~&  >>   [%best-filter-header best-filter-header]
@@ -362,14 +361,14 @@
     ?.  ?=([%behn %wake *] sin)  cor
     :: if the previous ping hasn't been answered, disconnect and ban
     ?:  .?(outbound-ping.u.erd)
-      %+  disconnect-peer  &  erp
+      %+  disconnect-peer  &  erp  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
     =/  nun  (~(rad og eny.bowl) (lsh [3 8] 1))
     =.  outbound-ping.u.erd  [~ now.bowl nun]
     =.  earth-peers  (~(put by earth-peers) erp u.erd)
     %-  emil
     :-  (set-ping-timer erp)
-    %+  open:tcp
-        erp
+    :_  ~
+    %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
     :~  [%ping nun]
     ==
@@ -493,6 +492,40 @@
   ++  max-block-locator-size  101
   --
 ::
+++  have-live-peers
+  ^-  ?
+  %-  ~(any by earth-peers)
+  |=  erd=earth-peer-state
+      handshake-done.erd
+::
+++  is-fully-synced
+  ^-  ?
+  ?&  block-headers-are-synced
+      filter-headers-are-synced
+  ==
+::
+++  block-headers-are-synced
+  ^-  ?
+  =*  haz  block-hash.best-block
+  =*  het  block-height.best-block
+  =/  hed  (~(got by block-headers) haz)
+  =/  tim  (de-earth-time time.block-header.hed)
+  =/  hit  :: TODO: handle the possibility of a peer falsely setting a higher starting-height
+    %-  ~(rep by earth-peers)
+    |=  [[erp=earth-address erd=earth-peer-state] acc=block-height]
+    %+  max
+        starting-height.erd
+        acc
+  ?&  have-live-peers
+      (gte tim (sub now.bowl ~d1))
+      (gte het hit)
+  ==
+::
+++  filter-headers-are-synced
+  ^-  ?
+  .=  block-hash.best-block
+      block-hash.best-filter-header
+::
 ++  main-chain-has-hash-at-height
   |=  [haz=block-hash het=block-height]
   ^-  ?
@@ -551,7 +584,7 @@
   ::
   ++  is-synced
     ^-  card
-    =/  dat  `is-synced:update`^is-synced
+    =/  dat  `is-synced:update`is-fully-synced
     =/  paf  /is-synced
     %+  fact  paf  [%is-synced !>(dat)]
   ::
@@ -773,6 +806,7 @@
 ++  connect-to-peer
   |=  erp=earth-address
   ^+  cor
+  ~&  >>  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
   =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
@@ -799,6 +833,7 @@
 ++  disconnect-peer
   |=  [ban=? erp=earth-address]
   ^+  cor
+  =/  was-synced  is-fully-synced
   =/  erd  (~(get by earth-peers) erp)
   ?~  erd  cor
   =.  earth-peers  (~(del by earth-peers) erp)
@@ -819,11 +854,10 @@
     ::
     ==
   =.  cor  connect-to-more-peers
-  ?~  earth-peers   :: TODO: improve / remove sync state
-    =.  is-synced  |
-    %-  emit
-    %~  is-synced  make-update  ~
-  cor
+  ?:  have-live-peers  cor
+  ?.  was-synced  cor
+  %-  emit
+  %~  is-synced  make-update  ~
 ::
 ++  make-connect-messages
   ^-  (list message:b-net)
@@ -876,8 +910,7 @@
     %=  $
         ads  t.ads
     ==
-  =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
-  :: if we still lack addresses, get more from some peer
+  =.  cor  connect-to-more-peers
   =/  num-addrs  ~(wyt in earth-addresses)
   ?:  (gte num-addrs target-addresses.net-params)  cor
   =/  som  get-some-peer
@@ -895,13 +928,15 @@
   ::
       %version
     ~&  >  msg
-    ?.  ?&  =(version.msg protocol-version)
+    ?.  ?&  !handshake-done.erd
+            (gte version.msg minimum-peer-protocol-version.net-params)
             (peer-services-are-sufficient services.msg)
         ==
       %+  disconnect-peer
           &
           erp
-    =:  services.erd         services.msg
+    =:  handshake-done.erd   &
+        services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
     =.  earth-peers  (~(put by earth-peers) erp erd)
@@ -1152,23 +1187,31 @@
     =/  tip  (~(got by filter-headers) block-hash.best-filter-header)
     =/  til  (got:on-bh-index bh-index (add block-height.best-filter-header len))
     ?>  =(0 filter-type.msg)
-    ?>  =(tip previous-filter-header.msg)
+    ?>  =(tip previous-filter-header.msg)  :: TODO: follow up on mismatch
     ?>  =(til stop-hash.msg)
     =/  pre  previous-filter-header.msg
     =/  het  +(block-height.best-filter-header)
+    =/  was-synced  is-fully-synced
     |-
     ?~  filter-hashes.msg
-      ?:  =(block-hash.best-filter-header block-hash.best-block)
-        ?:  is-synced  cor
-        =.  is-synced  &
+      ?:  is-fully-synced
+        ?:  was-synced  cor
         %-  emit
         %~  is-synced  make-update  ~
+      ?:  block-headers-are-synced
+        =/  som  get-some-peer
+        ?~  som  cor
+        %-  emit
+        %+  send:tcp  u.som
+        %-  ~(write ne:b-ser network)
+        :~  make-getcfheaders-message
+        ==
       =/  som  get-some-peer
       ?~  som  cor
       %-  emit
       %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
-      :~  make-getcfheaders-message
+      :~  [%getheaders make-block-locator ~]
       ==
     =/  haz  (got:on-bh-index bh-index het)
     =/  fed  (make-filter-header:b-fil pre i.filter-hashes.msg)
@@ -1204,25 +1247,21 @@
   ::
       %headers
     ~&  >>  [%headers-from erp]
-    :: current heuristic for determining if block headers are synced:
-    :: keep requesting headers until a headers response is null  :: TODO: improve this
-    ?.  .?(headers.msg)
-      ?:  =(block-hash.best-block block-hash.best-filter-header)
-        ?:  is-synced  cor
-        =.  is-synced  &
+    =/  was-synced  is-fully-synced
+    |-
+    ?~  headers.msg    :: TODO: increase known height of this peer if now greater
+      ?:  is-fully-synced  cor
+      =?  cor  was-synced
         %-  emit
         %~  is-synced  make-update  ~
-      :: if block headers are caught up and filter headers aren't,
-      :: get filter headers
-      =/  som  get-some-peer
-      ?~  som  cor
-      %-  emit
-      %+  send:tcp  u.som
-      %-  ~(write ne:b-ser network)
-      :~  make-getcfheaders-message
-      ==
-    |-
-    ?~  headers.msg
+      ?:  block-headers-are-synced
+        =/  som  get-some-peer
+        ?~  som  cor
+        %-  emit
+        %+  send:tcp  u.som
+        %-  ~(write ne:b-ser network)
+        :~  make-getcfheaders-message
+        ==
       =/  som  get-some-peer
       ?~  som  cor
       %-  emit
@@ -1235,15 +1274,14 @@
     ?-  -.val
     ::
         %redundant
-      ?:  =(~ t.headers.msg)
-        ~&  >>>  %redundant-block-headers
-        cor
       %=  $
           headers.msg  t.headers.msg
       ==
     ::
         %orphan
       ~&  [%orphan-block-header block-hash.val hed]
+      :: TODO: save orphan headers per peer while unsynced and then process them when synced becomes true
+      ?.  is-fully-synced  cor
       %-  emit
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
@@ -1252,9 +1290,7 @@
     ::
         %invalid
       ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
-      %+  disconnect-peer
-          &
-          erp
+      %+  disconnect-peer  &  erp
     ::
         %valid
       =*  haz  block-hash.val
@@ -1268,7 +1304,7 @@
       =/  is-extending-best  =(block-hash.best-block previous-block-hash.hed)
       =/  is-reorg  &(is-new-best-block !is-extending-best)
       ?.  is-reorg
-        =?  cor  is-new-best-block
+        =?  cor  is-new-best-block  :: TODO: if not extending best, a follow up request should be sent to *that* peer
           =.  best-block  [haz het wok]
           =.  bh-index    (put:on-bh-index bh-index het haz)
           =.  cor
@@ -1388,10 +1424,6 @@
         :-  %reorg-rollback
             last-common-block
       =.  cor
-        =.  is-synced  |
-        %-  emit
-        %~  is-synced  make-update  ~
-      =.  cor
         %-  emil
         %-  ~(rep by pending-block-hash-reqs)
         |=  [[key=block-hash val=(set pending-block-hash-req)] acc=(list card)]
@@ -1496,6 +1528,7 @@
     %_  net-params
         target-addresses  500
         target-peers      10
+        minimum-peer-protocol-version           70.016
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
@@ -1532,7 +1565,7 @@
     ?-  -.u.old
       %0  cor(state u.old)
     ==
-  =.  cor  connect-to-more-peers                        :: TODO: move to a timer loop
+  =.  cor  connect-to-more-peers
   cor
 ::
 --

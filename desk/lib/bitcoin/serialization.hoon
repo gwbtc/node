@@ -208,8 +208,8 @@
   ++  en-network-address-v1-partial
     |=  adr=address-v1-partial:network
     =.  en-core  (en-network-services services.adr)
-    =.  en-core  (en-prep 16 ip.adr)
-    =.  en-core  (en-prep 2 port.adr)
+    =.  en-core  (en-prep 16 (rev 3 16 ip.adr))
+    =.  en-core  (en-prep 2 (rev 3 2 port.adr))
         en-core
   ::
   ++  en-network-address-v1
@@ -225,8 +225,8 @@
     =.  en-core  (en-network-address-id id.adr)
     =/  siz      (address-id-to-size:network-helpers id.adr)
     =.  en-core  (en-compactsize siz)
-    =.  en-core  (en-prep siz address.adr)
-    =.  en-core  (en-prep 2 port.adr)
+    =.  en-core  (en-prep siz (rev 3 siz address.adr))
+    =.  en-core  (en-prep 2 (rev 3 2 port.adr))
         en-core
   ::
   ++  en-network-block-locator
@@ -666,8 +666,8 @@
     =^  port      de-core  (de-read 2)
     :_  de-core
     :*  services
-        ip
-        port
+        (rev 3 16 ip)
+        (rev 3 2 port)
     ==
   ::
   ++  de-network-address-v1
@@ -691,8 +691,8 @@
     :*  time
         (parse-service-bits:network-helpers ser-bits)
         addr-id
-        address
-        port
+        (rev 3 siz address)
+        (rev 3 2 port)
     ==
   ::
   ++  de-network-block-locator

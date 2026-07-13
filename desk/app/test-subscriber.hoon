@@ -114,6 +114,9 @@
     ?.  ?=(%fact -.sin)  cor
     =/  dat  !<(is-synced:update q.cage.sin)
     ~&  >  dat
+    ?:  dat
+      %-  emit
+          (watch-light-client /best-block)
     cor
   ::
       [%block-header %hash *]
@@ -210,8 +213,7 @@
 ++  init
   ^+  cor
   %-  emil
-  :~  (watch-light-client /best-block)
-      (watch-light-client /is-synced)
+  :~  (watch-light-client /is-synced)
   ==
 ::
 ++  save
