@@ -29,6 +29,7 @@
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
   $:  handshake-done=_|
+      wtxidrelay=_|
       starting-height=block-height
       =services:b-net
       last-heard=time
@@ -225,7 +226,7 @@
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
-    ?~  som  !!
+    ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
@@ -252,7 +253,7 @@
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
       =.  cor  (emit (set-pending-block-height-req-timer het req))
       =/  som  get-some-peer
-      ?~  som  !!
+      ?~  som  cor
       %-  emit
       %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
@@ -281,7 +282,7 @@
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
-    ?~  som  !!
+    ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
@@ -299,7 +300,7 @@
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
       =.  cor  (emit (set-pending-block-height-req-timer het req))
       =/  som  get-some-peer
-      ?~  som  !!
+      ?~  som  cor
       %-  emit
       %+  send:tcp  u.som
       %-  ~(write ne:b-ser network)
@@ -329,7 +330,7 @@
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
     =/  som  get-some-peer
-    ?~  som  !!
+    ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
     %-  ~(write ne:b-ser network)
@@ -812,10 +813,10 @@
   =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
   %-  emil
   :-  (set-ping-timer erp)
-  %+  open:tcp
-      erp
+  %+  open:tcp  erp
   %-  ~(write ne:b-ser network)
-      make-connect-messages
+  :~  make-version-message
+  ==
 ::
 ++  connect-to-more-peers
   ^+  cor
@@ -859,9 +860,8 @@
   %-  emit
   %~  is-synced  make-update  ~
 ::
-++  make-connect-messages
-  ^-  (list message:b-net)
-  =-  [- [%sendheaders ~] [%sendaddrv2 ~] ~]
+++  make-version-message
+  ^-  message:b-net
   :-  %version
   =/  ver  *version-payload:b-net
   %_  ver
@@ -935,10 +935,35 @@
       %+  disconnect-peer
           &
           erp
-    =:  handshake-done.erd   &
-        services.erd         services.msg
+    =:  services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
+    =.  earth-peers  (~(put by earth-peers) erp erd)
+    %-  emit
+    %+  send:tcp  erp
+    %-  ~(write ne:b-ser network)
+    :~  [%sendheaders ~]
+        [%sendaddrv2 ~]
+    ==
+  ::
+      %wtxidrelay
+    ~&  >  msg
+    ?:  handshake-done.erd
+      %+  disconnect-peer
+          &
+          erp
+    =.  wtxidrelay.erd  &
+    %_  cor
+        earth-peers  (~(put by earth-peers) erp erd)
+    ==
+  ::
+      %verack
+    ~&  >  msg
+    ?:  handshake-done.erd
+      %+  disconnect-peer
+          &
+          erp
+    =.  handshake-done.erd  &
     =.  earth-peers  (~(put by earth-peers) erp erd)
     %-  emit
     %+  send:tcp  erp
