@@ -14,6 +14,8 @@
       blacklist-interval=@dr
       ping-interval=@dr
       pending-req-retry-interval=@dr
+      tx-inv-broadcast-retry-interval=@dr
+      tx-broadcast-cache-expiration=@dr
   ==
 +$  earth-addresses
   %+  map
@@ -51,6 +53,9 @@
       [%block ~]
   ==
 ::
++$  tx-inv-broadcast-queue  (list transaction)
++$  tx-broadcast-cache      (map txid transaction)
+::
 +$  best-block  [=block-hash =block-height =chainwork]
 +$  bh-index    ((mop block-height block-hash) lth)
 ::
@@ -59,14 +64,17 @@
 +$  filters             (map block-hash filter:b-fil)
 ::
 +$  state-0
-  $:  =protocol-version:b-net
-      =network:b-net
+  $:  =network:b-net
+      =protocol-version:b-net
+      =services:b-net
       =net-params
       =earth-peers
       =earth-addresses
       =blacklist
       =pending-block-hash-reqs
       =pending-block-height-reqs
+      =tx-inv-broadcast-queue
+      =tx-broadcast-cache
       =best-block
       =bh-index
       =best-filter-header
@@ -97,8 +105,9 @@
   ?+  mak  ~|(bad-poke/mak !!) 
   ::
       %log-info
-    ~&       [%protocol-version protocol-version]
     ~&       [%network network]
+    ~&       [%services services]
+    ~&       [%protocol-version protocol-version]
     ~&       [%net-params net-params]
     ~&  >    [%is-synced is-fully-synced]
     ~&  >    [%best-block best-block]
@@ -109,10 +118,25 @@
     ~&  >>   [%filters ~(wyt in filters)]
     ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
+    ~&  >>>  [%tx-inv-broadcast-queue (lent tx-inv-broadcast-queue)]
+    ~&  >>>  [%tx-broadcast-cache ~(wyt in tx-broadcast-cache)]
     ~&   >   [%earth-peers ~(wyt in earth-peers)]
     ~&   >   [%earth-addresses ~(wyt in earth-addresses)]
     ~&   >   [%blacklist ~(wyt in blacklist)]
     cor
+  ::
+      %broadcast-transaction
+    =/  txn  !<(transaction vaz)
+    ?:  .?(tx-inv-broadcast-queue)
+      %_  cor
+          tx-inv-broadcast-queue  (snoc tx-inv-broadcast-queue txn)
+      ==
+    ?.  have-live-peers
+      =.  tx-inv-broadcast-queue  txn^~
+      %-  emit
+          set-tx-inv-broadcast-queue-timer
+    %-  broadcast-tx-inv
+        txn
   ::
       %add-earth-peer
     =/  erp  !<(earth-address vaz)
@@ -372,6 +396,27 @@
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
     :~  [%ping nun]
+    ==
+  ::
+      [%timer %tx-inv-broadcast-queue ~]
+    ?.  have-live-peers
+      %-  emit
+          set-tx-inv-broadcast-queue-timer
+    =/  txs  tx-inv-broadcast-queue
+    |-
+    ?~  txs
+      %_  cor
+          tx-inv-broadcast-queue  ~
+      ==
+    =.  cor  (broadcast-tx-inv i.txs)
+    %=  $
+        txs  t.txs
+    ==
+  ::
+      [%timer %tx-broadcast-cache txid-or-wtxid=@ta ~]
+    =/  tid  (slav %ux txid-or-wtxid.wir)
+    %_  cor
+        tx-broadcast-cache  (~(del by tx-broadcast-cache) tid)
     ==
   ::
       [%timer %pending-req %block %hash block-hash=@ta ~]
@@ -714,6 +759,21 @@
       timer
       /timer/blacklist
 ::
+++  set-tx-inv-broadcast-queue-timer
+  ^-  card
+  %.  tx-inv-broadcast-retry-interval:net-params
+  %~  set
+      timer
+      /timer/tx-inv-broadcast-queue
+::
+++  set-tx-broadcast-cache-timer
+  |=  tid=txid
+  ^-  card
+  %.  tx-broadcast-cache-expiration:net-params
+  %~  set
+      timer
+      /timer/tx-broadcast-cache/[(scot %ux tid)]
+::
 ++  set-pending-block-hash-req-timer
   |=  [haz=block-hash req=pending-block-hash-req]
   ^-  card
@@ -866,6 +926,7 @@
   =/  ver  *version-payload:b-net
   %_  ver
       version     protocol-version
+      services    services
       time        (en-earth-time now.bowl)
       user-agent  'urbit'
   ==
@@ -885,6 +946,31 @@
   |=  [start=block-height stop=block-hash]
   ^-  message:b-net
   [%getcfilters 0 start stop]
+::
+++  broadcast-tx-inv
+  |=  txn=transaction
+  ^+  cor
+  =/  tid  (make-txid:b-ser txn)
+  =/  wid  (make-wtxid:b-ser txn)
+  =.  tx-broadcast-cache
+    %-  ~(gas by tx-broadcast-cache)
+    :~  [tid txn]
+        [wid txn]
+    ==
+  %-  emil
+  :+  (set-tx-broadcast-cache-timer tid)
+      (set-tx-broadcast-cache-timer wid)
+  %+  turn  ~(tap by earth-peers)
+  |=  [erp=earth-address erd=earth-peer-state]
+  %+  send:tcp  erp
+  %-  ~(write ne:b-ser network)
+  =/  inv
+    ?-  wtxidrelay.erd
+        %.y  [%msg-wtx wid]
+        %.n  [%msg-tx tid]
+    ==
+  :~  [%inv inv ~]
+  ==
 ::
 ++  handle-addrv2
   |=  ads=(list address-v2:b-net)
@@ -1012,6 +1098,32 @@
     ~&  >>  %inv
     :: TODO: handle block invs by sending getheaders
     cor
+  ::
+      %getdata
+    |-
+    ?~  inventory.msg  cor
+    =*  inv  i.inventory.msg
+    =.  cor
+      ?.  ?|  ?=(%msg-tx type.inv)
+              ?=(%msg-wtx type.inv)
+              ?=(%msg-witness-tx type.inv)
+          ==
+        cor
+      :: serve a tx that was previously announced by inv
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :_  ~
+      =/  txn  (~(get by tx-broadcast-cache) hash.inv)
+      ?~  txn  [%notfound inv ~]
+      :-  %tx
+      ?.  ?=(%msg-tx type.inv)  u.txn
+      %_  u.txn
+          flag  0
+      ==
+    %=  $
+        inventory.msg  t.inventory.msg
+    ==
   ::
       %block
     :: find a known, valid header corresponding to this block,
@@ -1551,20 +1663,23 @@
   =*  wok  chainwork.val
   =.  net-params
     %_  net-params
-        target-addresses  500
-        target-peers      10
-        minimum-peer-protocol-version           70.016
+        target-addresses                             500
+        target-peers                                 10
+        minimum-peer-protocol-version                70.016
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
-        blacklist-expiration  ~d3
-        blacklist-interval    ~d1
-        ping-interval         ~m2
-        pending-req-retry-interval  ~s15
+        blacklist-expiration                         ~d3
+        blacklist-interval                           ~d1
+        ping-interval                                ~m2
+        pending-req-retry-interval                   ~s15
+        tx-inv-broadcast-retry-interval              ~s15
+        tx-broadcast-cache-expiration                ~s30
     ==
   =.  cor  (emit set-blacklist-timer)
   %_  cor
       network        %mainnet
+      services       services(node-witness &)
   ::
       best-block     [haz het wok]
       bh-index       (put:on-bh-index bh-index het haz)
