@@ -14,6 +14,7 @@
       blacklist-interval=@dr
       ping-interval=@dr
       pending-req-retry-interval=@dr
+      header-sync-retry-interval=@dr
       tx-inv-broadcast-retry-interval=@dr
       tx-broadcast-cache-expiration=@dr
   ==
@@ -53,6 +54,14 @@
       [%block ~]
   ==
 ::
++$  header-sync-req
+  %-  unit
+  $:  who=earth-address
+      when=time
+      for=?(%filter-header %block-header)
+      at=block-hash
+  ==
+::
 +$  tx-inv-broadcast-queue  (list transaction)
 +$  tx-broadcast-cache      (map txid transaction)
 ::
@@ -73,6 +82,7 @@
       =blacklist
       =pending-block-hash-reqs
       =pending-block-height-reqs
+      =header-sync-req
       =tx-inv-broadcast-queue
       =tx-broadcast-cache
       =best-block
@@ -120,9 +130,10 @@
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
     ~&  >>>  [%tx-inv-broadcast-queue (lent tx-inv-broadcast-queue)]
     ~&  >>>  [%tx-broadcast-cache ~(wyt in tx-broadcast-cache)]
-    ~&   >   [%earth-peers ~(wyt in earth-peers)]
     ~&   >   [%earth-addresses ~(wyt in earth-addresses)]
     ~&   >   [%blacklist ~(wyt in blacklist)]
+    ~&   >   [%total-earth-peers ~(wyt in earth-peers)]
+    ~&   >   [%live-earth-peers (lent (skim ~(tap by earth-peers) |=([k=earth-address v=earth-peer-state] handshake-done.v)))]
     cor
   ::
       %broadcast-transaction
@@ -475,6 +486,22 @@
     :~  (make-getcfilters-message het haz)
     ==
   ::
+      [%timer %header-sync-retry req-type=@ta hash=@ta earth-peer=*]
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    =/  haz  (slav %ux hash.wir)
+    =*  for  req-type.wir
+    ?:  is-fully-synced  cor
+    ?~  header-sync-req  cor
+    :: if the latest sync req is different,
+    :: then we've already sent a subsequent one
+    ?.  ?&  =(erp who.u.header-sync-req)
+            =(haz at.u.header-sync-req)
+            =(for for.u.header-sync-req)
+        ==
+        cor
+    ~&  %retrying-header-sync
+        continue-syncing-headers
+  ::
       [%timer %blacklist ~]
     =.  blacklist
       %-  ~(rep by blacklist)
@@ -512,15 +539,20 @@
       ==
     ::
         %connected
-      ~&  >  %tcp-connected
-      cor
+      ~&  >  [%tcp-connected erp]
+      %-  emil
+      :_  (set-ping-timer erp)^~
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :~  make-version-message
+      ==
     ::
         %closed
-      ~&  >>>  %tcp-closed
+      ~&  >>>  [%tcp-closed erp]
       %+  disconnect-peer  |  erp
     ::
         %error
-      ~&  >>>  [%tcp-error msg.gif]
+      ~&  >>>  [%tcp-error erp msg.gif]
       %+  disconnect-peer  &  erp
     ::
     ==
@@ -798,6 +830,29 @@
     /timer/pending-req/block-filter/height/[(scot %ud het)]
   ==
 ::
+++  set-header-sync-retry-timer
+  |=  syc=^header-sync-req
+  ^-  card
+  %.  header-sync-retry-interval:net-params
+  %~  set
+      timer
+  %+  weld
+      /timer/header-sync-retry
+  %-  en-header-sync-retry-path
+      syc
+::
+++  end-header-sync-retry-timer
+  |=  syc=^header-sync-req
+  ^-  card
+  ?>  ?=(^ syc)
+  %.  when.u.syc
+  %~  end
+      timer
+  %+  weld
+      /timer/header-sync-retry
+  %-  en-header-sync-retry-path
+      syc
+::
 ++  en-earth-time
   |=  tim=time
   %+  div
@@ -808,6 +863,15 @@
   |=  ert=@ud
   %-  from-unix:chrono:userlib
       ert
+::
+++  en-header-sync-retry-path
+  |=  syc=^header-sync-req
+  ^-  path
+  ?>  ?=(^ syc)
+  %+  weld
+      `path`/[for.u.syc]/[(scot %ux at.u.syc)]
+  %-  en-earth-peer-path
+      who.u.syc
 ::
 ++  en-earth-peer-path
   |=  erp=earth-address
@@ -855,28 +919,29 @@
 ::
 ++  get-some-peer
   ^-  (unit earth-address)
-  =/  pes  ~(key by earth-peers)
-  =/  siz  ~(wyt in pes)
+  =/  pes
+    %+  skim  ~(tap by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+        handshake-done.erd
+  =/  siz  (lent pes)
   ?:  =(0 siz)  ~
   =/  ind  (~(rad og eny.bowl) siz)
   :-  ~
+  =<  p
   %+  snag
       ind
-      ~(tap in pes)
+      pes
 ::
 ++  connect-to-peer
   |=  erp=earth-address
   ^+  cor
-  ~&  >>  ['connecting to:' erp]
+  ~&  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
   =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
   %-  emil
-  :-  (set-ping-timer erp)
-  %+  open:tcp  erp
-  %-  ~(write ne:b-ser network)
-  :~  make-version-message
-  ==
+  %-  open:tcp
+      erp
 ::
 ++  connect-to-more-peers
   ^+  cor
@@ -947,6 +1012,44 @@
   ^-  message:b-net
   [%getcfilters 0 start stop]
 ::
+++  continue-syncing-headers
+  ^+  cor
+  =/  som  get-some-peer
+  ?~  som  cor
+  ?:  block-headers-are-synced
+    =.  header-sync-req
+      :*  ~
+          u.som
+          now.bowl
+          %filter-header
+          block-hash.best-filter-header
+      ==
+    =.  cor
+      %-  emit
+      %-  set-header-sync-retry-timer
+          header-sync-req
+    %-  emit
+    %+  send:tcp  u.som
+    %-  ~(write ne:b-ser network)
+    :~  make-getcfheaders-message
+    ==
+  =.  header-sync-req
+    :*  ~
+        u.som
+        now.bowl
+        %block-header
+        block-hash.best-block
+    ==
+  =.  cor
+    %-  emit
+    %-  set-header-sync-retry-timer
+        header-sync-req
+  %-  emit
+  %+  send:tcp  u.som
+  %-  ~(write ne:b-ser network)
+  :~  [%getheaders make-block-locator ~]
+  ==
+::
 ++  broadcast-tx-inv
   |=  txn=transaction
   ^+  cor
@@ -957,10 +1060,15 @@
     :~  [tid txn]
         [wid txn]
     ==
+  =/  pes
+    %+  skim  ~(tap by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+        handshake-done.erd
+  ?.  .?(pes)  cor
   %-  emil
   :+  (set-tx-broadcast-cache-timer tid)
       (set-tx-broadcast-cache-timer wid)
-  %+  turn  ~(tap by earth-peers)
+  %+  turn  pes
   |=  [erp=earth-address erd=earth-peer-state]
   %+  send:tcp  erp
   %-  ~(write ne:b-ser network)
@@ -1010,7 +1118,7 @@
 ++  handle-message
   |=  [[erp=earth-address erd=earth-peer-state] msg=message:b-net]
   ^+  cor
-  ?+  -.msg  cor
+  ?+  -.msg  cor  :: TODO: add a case for all messages where the handshake is checked at a minimum
   ::
       %version
     ~&  >  msg
@@ -1061,6 +1169,7 @@
     ==
   ::
       %ping
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
@@ -1068,6 +1177,7 @@
     ==
   ::
       %pong
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     ?~  outbound-ping.erd  cor
     ?.  =(nonce.msg nonce.u.outbound-ping.erd)  cor
     %_  cor
@@ -1076,6 +1186,7 @@
   ::
       %addr
     ~&  >>  [%addr (lent addresses.msg)]
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
     %-  handle-addrv2
     %+  turn  addresses.msg
@@ -1090,16 +1201,19 @@
   ::
       %addrv2
     ~&  >>  [%addrv2 (lent addresses.msg)]
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
     %-  handle-addrv2
         addresses.msg
   ::
       %inv
-    ~&  >>  %inv
+    ~&  %inv
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     :: TODO: handle block invs by sending getheaders
     cor
   ::
       %getdata
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     |-
     ?~  inventory.msg  cor
     =*  inv  i.inventory.msg
@@ -1126,6 +1240,7 @@
     ==
   ::
       %block
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     :: find a known, valid header corresponding to this block,
     :: and verify this block's transactions against that header's merkle root
     =*  bok  block.msg
@@ -1226,6 +1341,7 @@
     cor
   ::
       %cfilter
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     ?>  =(0 filter-type.msg)
     :: verify this filter against our filter headers
     =*  fil  filter.msg
@@ -1320,6 +1436,8 @@
     cor
   ::
       %cfheaders
+    ~&  >>  [%filter-headers-from erp]
+    ?.  handshake-done.erd  (disconnect-peer & erp)
     =/  len  (lent filter-hashes.msg)
     =/  tip  (~(got by filter-headers) block-hash.best-filter-header)
     =/  til  (got:on-bh-index bh-index (add block-height.best-filter-header len))
@@ -1328,28 +1446,25 @@
     ?>  =(til stop-hash.msg)
     =/  pre  previous-filter-header.msg
     =/  het  +(block-height.best-filter-header)
+    =/  is-sync-response
+      ?&  ?=(^ header-sync-req)
+          ?=(%filter-header for.u.header-sync-req)
+          =(block-hash.best-filter-header at.u.header-sync-req)
+          =(erp who.u.header-sync-req)
+      ==
+    =?  cor  is-sync-response
+      =/  syc  header-sync-req
+      =.  header-sync-req  ~
+      %-  emit
+      %-  end-header-sync-retry-timer
+          syc
     =/  was-synced  is-fully-synced
     |-
     ?~  filter-hashes.msg
-      ?:  is-fully-synced
-        ?:  was-synced  cor
-        %-  emit
-        %~  is-synced  make-update  ~
-      ?:  block-headers-are-synced
-        =/  som  get-some-peer
-        ?~  som  cor
-        %-  emit
-        %+  send:tcp  u.som
-        %-  ~(write ne:b-ser network)
-        :~  make-getcfheaders-message
-        ==
-      =/  som  get-some-peer
-      ?~  som  cor
+      ?.  is-fully-synced  continue-syncing-headers
+      ?:  was-synced  cor
       %-  emit
-      %+  send:tcp  u.som
-      %-  ~(write ne:b-ser network)
-      :~  [%getheaders make-block-locator ~]
-      ==
+      %~  is-synced  make-update  ~
     =/  haz  (got:on-bh-index bh-index het)
     =/  fed  (make-filter-header:b-fil pre i.filter-hashes.msg)
     =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
@@ -1384,33 +1499,36 @@
   ::
       %headers
     ~&  >>  [%headers-from erp]
+    ?.  handshake-done.erd  (disconnect-peer & erp)
+    =/  is-sync-response
+      ?&  ?=(^ header-sync-req)
+          ?=(%block-header for.u.header-sync-req)
+          =(block-hash.best-block at.u.header-sync-req)
+          =(erp who.u.header-sync-req)
+      ==
+    =?  cor  is-sync-response
+      =/  syc  header-sync-req
+      =.  header-sync-req  ~
+      %-  emit
+      %-  end-header-sync-retry-timer
+          syc
     =/  was-synced  is-fully-synced
     |-
     ?~  headers.msg    :: TODO: increase known height of this peer if now greater
       ?:  is-fully-synced  cor
       =?  cor  was-synced
+        :: if we were synced and now aren't, it is because of a reorg
         %-  emit
         %~  is-synced  make-update  ~
-      ?:  block-headers-are-synced
-        =/  som  get-some-peer
-        ?~  som  cor
-        %-  emit
-        %+  send:tcp  u.som
-        %-  ~(write ne:b-ser network)
-        :~  make-getcfheaders-message
-        ==
-      =/  som  get-some-peer
-      ?~  som  cor
-      %-  emit
-      %+  send:tcp  u.som
-      %-  ~(write ne:b-ser network)
-      :~  [%getheaders make-block-locator ~]
-      ==
+      continue-syncing-headers
     =*  hed  i.headers.msg
     =/  val  (~(validate-block-header he:b-val now.bowl block-headers) hed)
     ?-  -.val
     ::
         %redundant
+      ?.  .?(t.headers.msg)
+        ~&  %redundant-headers
+        cor
       %=  $
           headers.msg  t.headers.msg
       ==
@@ -1611,7 +1729,7 @@
     ==
   +$  target  [secure=? =fief]
   +$  task
-    $%  [%connect =wire =target]
+    $%  [%connect =wire =target timeout=(unit @ud)]
         [%send =wire data=octs]
         [%close =wire]
     ==
@@ -1623,14 +1741,13 @@
     ==
   ::
   ++  open
-    |=  [erp=earth-address dat=octs]
+    |=  erp=earth-address
     ^-  (list card)
     ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
     =/  paf  (en-earth-peer-path erp)
     =/  sid  (weld /tcp paf)
-    :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp]])]
+    :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp] ~])]
         [%pass sid %agent [our.bowl %tcp] %watch sid]
-        (send erp dat)
     ==
   ::
   ++  close
@@ -1672,7 +1789,8 @@
         blacklist-expiration                         ~d3
         blacklist-interval                           ~d1
         ping-interval                                ~m2
-        pending-req-retry-interval                   ~s15
+        pending-req-retry-interval                   ~s5
+        header-sync-retry-interval                   ~s5
         tx-inv-broadcast-retry-interval              ~s15
         tx-broadcast-cache-expiration                ~s30
     ==
