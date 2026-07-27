@@ -1522,7 +1522,7 @@
         %~  is-synced  make-update  ~
       continue-syncing-headers
     =*  hed  i.headers.msg
-    =/  val  (~(validate-block-header he:b-val now.bowl block-headers) hed)
+    =/  val  (~(validate-block-header he:b-val now.bowl network block-headers) hed)
     ?-  -.val
     ::
         %redundant
@@ -1772,8 +1772,12 @@
 ::
 ++  init
   ^+  cor
-  =/  gen  genesis-block-header:b-val
-  =/  val  (~(validate-block-header he:b-val now.bowl block-headers) gen)
+  :: %mainnet by default
+  :: in order to use a test network, change the parameter below.
+  :: (if the agent was already running, you must nuke it and rebuild)
+  =.  network  %mainnet
+  =/  gen  (genesis-block-header:b-val network)
+  =/  val  (~(validate-block-header he:b-val now.bowl network block-headers) gen)
   ?>  ?=(%valid -.val)
   =*  haz  block-hash.val
   =*  het  block-height.val
@@ -1796,7 +1800,6 @@
     ==
   =.  cor  (emit set-blacklist-timer)
   %_  cor
-      network        %mainnet
       services       services(node-witness &)
   ::
       best-block     [haz het wok]

@@ -3,11 +3,12 @@
 +$  protocol-version  _70.016
 ::
 +$  network
-  $?  %testnet
-      %testnet3
-      %testnet4
-      %signet
+  $?  %regtest
       %mainnet
+      :: %testnet
+      :: %testnet3
+      :: %testnet4
+      :: %signet
   ==
 ::
 +$  message

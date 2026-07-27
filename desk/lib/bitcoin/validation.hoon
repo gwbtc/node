@@ -1,15 +1,30 @@
-/-  *bitcoin-common
+/-  *bitcoin-common,
+    b-net=bitcoin-network
 /+  b-ser=bitcoin-serialization
 |%
 ::
 ++  genesis-block-header
+  |=  net=network:b-net
   ^-  block-header
-  :*  0x1
-      0x0
-      0x4a5e.1e4b.aab8.9f3a.3251.8a88.c31b.c87f.618f.7667.3e2c.c77a.b212.7b7a.fded.a33b
-      1.231.006.505
-      0x1d00.ffff
-      0x7c2b.ac1d
+  ?+  net
+  ::
+    :*  0x1
+        0x0
+        0x4a5e.1e4b.aab8.9f3a.3251.8a88.c31b.c87f.618f.7667.3e2c.c77a.b212.7b7a.fded.a33b
+        1.231.006.505
+        0x1d00.ffff
+        0x7c2b.ac1d
+    ==
+  ::
+      %regtest
+    :*  0x1
+        0x0
+        0x4a5e.1e4b.aab8.9f3a.3251.8a88.c31b.c87f.618f.7667.3e2c.c77a.b212.7b7a.fded.a33b
+        1.296.688.602
+        0x207f.ffff
+        0x2
+    ==
+  ::
   ==
 ++  params
   |%
@@ -25,9 +40,9 @@
   --
 ::
 :: +he
-::   block header validation core            :: NOTE: currently assumes mainnet
+::   block header validation core
 ++  he
-  |_  [now=time hes=block-headers]
+  |_  [now=time net=network:b-net hes=block-headers]
   ::
   +$  validation-result
     $%  [%valid =block-hash =block-height =chainwork]
@@ -110,6 +125,7 @@
     ::
     ++  get-next-work-required
       ^-  @ux
+      ?:  =(net %regtest)  bits.block-header.pre
       ?.  =(0 (mod het difficulty-adjustment-interval))  bits.block-header.pre
       =/  epoch-first
         ^-  block-header
@@ -141,7 +157,7 @@
   ++  validate-genesis-block-header
     |=  hed=block-header
     ^-  validation-result
-    =/  gen       genesis-block-header
+    =/  gen       (genesis-block-header net)
     =/  gen-hash  (make-block-hash:b-ser gen)
     =/  hed-hash  (make-block-hash:b-ser hed)
     ?:  (~(has by hes) hed-hash)

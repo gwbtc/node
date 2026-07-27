@@ -175,10 +175,11 @@
     %+  en-prep    4
     ?-  net
         %mainnet   0xd9b4.bef9
-        %testnet   0xdab5.bffa
-        %testnet3  0x709.110b
-        %testnet4  0x283f.161c
-        %signet    0x40cf.030a
+        %regtest   0xdab5.bffa
+        :: %testnet   0xdab5.bffa
+        :: %testnet3  0x709.110b
+        :: %testnet4  0x283f.161c
+        :: %signet    0x40cf.030a
     ==
   ::
   ++  en-network-address-id
@@ -632,10 +633,11 @@
     :_  de-core
     ?+  magic          ~
         %0xd9b4.bef9   ~^%mainnet
-        %0xdab5.bffa   ~^%testnet
-        %0x709.110b    ~^%testnet3
-        %0x283f.161c   ~^%testnet4
-        %0x40cf.030a   ~^%signet
+        %0xdab5.bffa   ~^%regtest
+        :: %0xdab5.bffa   ~^%testnet
+        :: %0x709.110b    ~^%testnet3
+        :: %0x283f.161c   ~^%testnet4
+        :: %0x40cf.030a   ~^%signet
     ==
   ::
   ++  de-network-address-id
