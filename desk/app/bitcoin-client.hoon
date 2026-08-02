@@ -511,6 +511,13 @@
     %-  emit
         set-blacklist-timer
   ::
+      [%explorer %file-update ~]
+    ?.  ?=([%clay %writ *] sin)  cor
+    ~&  >>  'updating explorer ui'
+    =.  cor  (emil set-explorer-ui)
+    =.  cor  (emit watch-explorer-ui-files)
+    cor
+  ::
   ==
 ::
 ++  agent
@@ -664,13 +671,13 @@
     ^-  card
     =/  dat  `is-synced:update`is-fully-synced
     =/  paf  /is-synced
-    %+  fact  paf  [%is-synced !>(dat)]
+    %+  fact  paf  [%bitcoin-client-is-synced !>(dat)]
   ::
   ++  best-block
     |=  dat=best-block:update
     ^-  card
     =/  paf  /best-block
-    %+  fact  paf  [%best-block !>(dat)]
+    %+  fact  paf  [%bitcoin-client-best-block !>(dat)]
   ::
   ++  block-header-by-hash
     |_  haz=block-hash
@@ -679,7 +686,7 @@
     ++  res
       |=  dat=block-header-by-hash:update
       ^-  (list card)
-      :~  (fact sub %block-header-by-hash !>(dat))
+      :~  (fact sub %bitcoin-client-block-header-by-hash !>(dat))
           end
       ==
     --
@@ -691,7 +698,7 @@
     ++  res
       |=  dat=block-header-by-height:update
       ^-  (list card)
-      :~  (fact sub %block-header-by-height !>(dat))
+      :~  (fact sub %bitcoin-client-block-header-by-height !>(dat))
           end
       ==
     --
@@ -703,7 +710,7 @@
     ++  res
       |=  dat=block-filter-by-hash:update
       ^-  (list card)
-      :~  (fact sub %block-filter-by-hash !>(dat))
+      :~  (fact sub %bitcoin-client-block-filter-by-hash !>(dat))
           end
       ==
     --
@@ -715,7 +722,7 @@
     ++  res
       |=  dat=block-filter-by-height:update
       ^-  (list card)
-      :~  (fact sub %block-filter-by-height !>(dat))
+      :~  (fact sub %bitcoin-client-block-filter-by-height !>(dat))
           end
       ==
     --
@@ -727,7 +734,7 @@
     ++  res
       |=  dat=block-by-hash:update
       ^-  (list card)
-      :~  (fact sub %block-by-hash !>(dat))
+      :~  (fact sub %bitcoin-client-block-by-hash !>(dat))
           end
       ==
     --
@@ -739,7 +746,7 @@
     ++  res
       |=  dat=block-by-height:update
       ^-  (list card)
-      :~  (fact sub %block-by-height !>(dat))
+      :~  (fact sub %bitcoin-client-block-by-height !>(dat))
           end
       ==
     --
@@ -751,7 +758,7 @@
     ++  res
       |=  dat=transaction:update
       ^-  (list card)
-      :~  (fact sub %transaction !>(dat))
+      :~  (fact sub %bitcoin-client-transaction !>(dat))
           end
       ==
     --
@@ -1768,10 +1775,65 @@
   ::
   --
 ::
+++  set-explorer-ui
+  ^-  (list card)
+  =/  bek  /[(scot %p p.byk.bowl)]/[q.byk.bowl]/[(scot %da now.bowl)]
+  =/  html-res
+    ^-  cache-entry:eyre
+    :-  &
+    :-  %payload
+    :-  [200 ['Content-Type' 'text/html'] ~]
+    :-  ~
+    %-  as-octt:mimes:html
+    %-  en-xml:html
+    ;html(our +:(scow %p our.bowl))
+      ;head
+        ;meta(charset "utf-8");
+        ;title:"Bitcoin Explorer"
+        ;link(href "explorer.css", rel "stylesheet");
+      ==
+      ;body
+        ;p:"test"
+        ;script(src "explorer.js");
+      ==
+    ==
+  =/  css-res
+    ^-  cache-entry:eyre
+    :-  &
+    :-  %payload
+    :-  [200 ['Content-Type' 'text/css'] ~]
+    :-  ~
+    %-  as-octs:mimes:html
+    .^  @t
+        %cx
+        (weld bek /fil/explorer/css)
+    ==
+  =/  js-res
+    ^-  cache-entry:eyre
+    :-  &
+    :-  %payload
+    :-  [200 ['Content-Type' 'application/javascript'] ~]
+    :-  ~
+    %-  as-octs:mimes:html
+    .^  @t
+        %cx
+        (weld bek /fil/explorer/js)
+    ==
+  :~  [%pass /explorer/set-response/html %arvo %e %set-response '/explorer' ~ html-res]
+      [%pass /explorer/set-response/css %arvo %e %set-response '/explorer.css' ~ css-res]
+      [%pass /explorer/set-response/js %arvo %e %set-response '/explorer.js' ~ js-res]
+  ==
+::
+++  watch-explorer-ui-files
+  ^-  card
+  [%pass /explorer/file-update %arvo %c %warp our.bowl q.byk.bowl [~ %next %z da+now.bowl /fil/explorer]]
+::
   ::
 ::
 ++  init
   ^+  cor
+  =.  cor  (emil set-explorer-ui)
+  =.  cor  (emit watch-explorer-ui-files)
   :: %mainnet by default
   :: in order to use a test network, change the parameter below.
   :: (if the agent was already running, you must nuke it and rebuild)
@@ -1785,7 +1847,7 @@
   =.  net-params
     %_  net-params
         target-addresses                             500
-        target-peers                                 10
+        target-peers                                 1
         minimum-peer-protocol-version                70.016
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
