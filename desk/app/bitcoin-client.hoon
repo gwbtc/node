@@ -1797,6 +1797,17 @@
         ;script(src "explorer.js");
       ==
     ==
+  =/  logo-res
+    ^-  cache-entry:eyre
+    :-  &
+    :-  %payload
+    :-  [200 ['Content-Type' 'image/svg+xml'] ~]
+    :-  ~
+    %-  as-octs:mimes:html
+    .^  @t
+        %cx
+        (weld bek /fil/gw-logo/svg)
+    ==
   =/  css-res
     ^-  cache-entry:eyre
     :-  &
@@ -1820,6 +1831,7 @@
         (weld bek /fil/explorer/js)
     ==
   :~  [%pass /explorer/set-response/html %arvo %e %set-response '/explorer' ~ html-res]
+      [%pass /explorer/set-response/logo %arvo %e %set-response '/gw-logo.svg' ~ logo-res]
       [%pass /explorer/set-response/css %arvo %e %set-response '/explorer.css' ~ css-res]
       [%pass /explorer/set-response/js %arvo %e %set-response '/explorer.js' ~ js-res]
   ==
