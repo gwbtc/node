@@ -1,4 +1,6 @@
 :root {
+  --explorer-mono: "Space Mono", "JetBrains Mono", "Cascadia Code",
+    "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
@@ -32,7 +34,7 @@ dd {
 .explorer {
   width: min(1200px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 48px 0 72px;
+  padding: 28px 0 72px;
 }
 
 .explorer__header,
@@ -44,10 +46,9 @@ dd {
 }
 
 .explorer__header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 
-.explorer__eyebrow,
 .panel__eyebrow {
   color: #f7931a;
   font-size: 0.72rem;
@@ -57,18 +58,24 @@ dd {
 }
 
 .explorer__title {
-  margin-top: 5px;
-  font-size: clamp(1.8rem, 4vw, 2.7rem);
-  letter-spacing: -0.04em;
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  font-family: var(--explorer-mono);
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
 
-.network-badge,
-.panel__status {
-  color: #a9afaa;
-  font-size: 0.8rem;
+.explorer__initials {
+  color: #f7931a;
+  font-weight: 750;
+  letter-spacing: 0.02em;
 }
 
 .network-badge {
+  color: #a9afaa;
+  font-size: 0.8rem;
   padding: 8px 12px;
   border: 1px solid #313632;
   border-radius: 999px;
@@ -103,6 +110,31 @@ dd {
   border-bottom: 1px solid #292e2a;
 }
 
+.block-header-panel .panel__header {
+  gap: 12px;
+}
+
+.block-search {
+  width: min(100%, 420px);
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid #343a35;
+  border-radius: 8px;
+  outline: none;
+  color: #eef1ee;
+  background: #161917;
+  font: inherit;
+}
+
+.block-search::placeholder {
+  color: #777e78;
+}
+
+.block-search:focus {
+  border-color: #f7931a;
+  box-shadow: 0 0 0 2px rgba(247, 147, 26, 0.15);
+}
+
 .panel__title {
   margin-top: 3px;
   font-size: 1.15rem;
@@ -111,7 +143,7 @@ dd {
 
 .block-header-row {
   display: grid;
-  grid-auto-columns: minmax(155px, 1fr);
+  grid-auto-columns: minmax(180px, 1fr);
   grid-auto-flow: column;
   gap: 12px;
   overflow-x: auto;
@@ -121,7 +153,9 @@ dd {
 
 .block-header-card {
   position: relative;
-  min-height: 152px;
+  display: grid;
+  aspect-ratio: 1;
+  grid-template-rows: auto 1fr auto;
   padding: 18px;
   border: 1px solid #343a35;
   border-top: 3px solid #f7931a;
@@ -140,29 +174,31 @@ dd {
   content: "";
 }
 
-.block-header-card__eyebrow,
 .block-header-card__meta {
+  margin: 0;
   color: #8f9690;
   font-size: 0.72rem;
 }
 
 .block-header-card__height {
-  margin-top: 4px;
-  font-size: 1.3rem;
+  margin: 0;
+  color: #8f9690;
+  font-family: var(--explorer-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
 }
 
 .block-header-card__hash {
-  overflow: hidden;
-  margin-top: 20px;
-  color: #c7ccc8;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.72rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.block-header-card__meta {
-  margin-top: 9px;
+  align-self: center;
+  margin: 14px 0;
+  color: #eef1ee;
+  font-family: var(--explorer-mono);
+  font-size: 0.84rem;
+  font-variant-ligatures: none;
+  letter-spacing: 0.04em;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .block-header-card--placeholder {
@@ -179,13 +215,13 @@ dd {
 
 .block-header-card--placeholder .block-header-card__height {
   width: 55%;
-  height: 22px;
-  margin-top: 5px;
+  height: 11px;
 }
 
 .block-header-card--placeholder .block-header-card__hash {
   width: 100%;
-  margin-top: 29px;
+  height: 4.3rem;
+  margin: 14px 0;
 }
 
 .block-header-card--placeholder .block-header-card__meta {
@@ -277,14 +313,6 @@ dd {
 
   .explorer__header {
     align-items: flex-start;
-  }
-
-  .network-badge {
-    font-size: 0;
-  }
-
-  .network-badge::before {
-    margin-right: 0;
   }
 
   .panel__header,

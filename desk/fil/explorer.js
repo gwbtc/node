@@ -221,10 +221,6 @@ function BlockHeaderCard(header) {
     attributes: { 'data-block-hash': header.hash }
   }, [
     element('p', {
-      className: 'block-header-card__eyebrow',
-      text: 'Block height'
-    }),
-    element('h3', {
       className: 'block-header-card__height',
       text: Number(header.height).toLocaleString()
     }),
@@ -242,23 +238,20 @@ function BlockHeaderCard(header) {
 function BlockHeaderPanel(headers) {
   return element('section', {
     className: 'panel block-header-panel',
-    attributes: { 'aria-labelledby': 'recent-blocks-title' }
+    attributes: { 'aria-label': 'Recent block headers' }
   }, [
     element('header', { className: 'panel__header' }, [
-      element('div', {}, [
-        element('p', { className: 'panel__eyebrow', text: 'Blockchain' }),
-        element('h2', {
-          className: 'panel__title',
-          text: 'Recent blocks',
-          attributes: { id: 'recent-blocks-title' }
-        })
-      ]),
-      element('p', {
-        className: 'panel__status',
-        text: headers.every(({ isPlaceholder }) => isPlaceholder)
-          ? 'Waiting for headers'
-          : `${headers.length} blocks`
-      })
+      element('input', {
+        className: 'block-search',
+        attributes: {
+          type: 'search',
+          placeholder: 'Search by block height or block hash',
+          'aria-label': 'Search by block height or block hash',
+          autocomplete: 'off',
+          spellcheck: 'false'
+        }
+      }),
+      element('div', { className: 'network-badge', text: 'Bitcoin network' })
     ]),
     element('div', {
       className: 'block-header-row',
@@ -328,11 +321,13 @@ function BlockDataPanel(block) {
 function ExplorerApp(state) {
   return element('main', { className: 'explorer' }, [
     element('header', { className: 'explorer__header' }, [
-      element('div', {}, [
-        element('p', { className: 'explorer__eyebrow', text: 'GroundWire' }),
-        element('h1', { className: 'explorer__title', text: '%explorer' })
-      ]),
-      element('div', { className: 'network-badge', text: 'Bitcoin network' })
+      element('h1', { className: 'explorer__title' }, [
+        element('span', {
+          className: 'explorer__initials',
+          text: 'GW'
+        }),
+        element('span', { text: '%explorer' })
+      ])
     ]),
     BlockHeaderPanel(recentHeaders(state)),
     BlockDataPanel(state.selectedBlock)
