@@ -181,7 +181,63 @@
 ++  peek
   |=  poe=(pole @ta)
   ^-  (unit (unit cage))
-  ~
+  ?>  =(src.bowl our.bowl)
+  ?+  poe  ~
+  ::
+      [%x %is-synced ~]
+    :+  ~  ~
+    :-  %bitcoin-client-is-synced
+    !>
+    ^-  is-synced:update
+        is-fully-synced
+  ::
+      [%x %best-block ~]
+    :+  ~  ~
+    :-  %bitcoin-client-best-block
+    !>
+    ^-  best-block:update
+    :+  %new
+        block-height.best-block
+        block-hash.best-block
+  ::
+      [%x %block-header %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  dat
+      =/  hed  (~(get by block-headers) haz)
+      ?~  hed  ~
+      ?.  (main-chain-has-hash-at-height haz block-height.u.hed)  ~
+      :_  block-header.u.hed
+      %:  make-block-info
+          block-height.u.hed
+          haz
+          chainwork.u.hed
+      ==
+    :+  ~  ~
+    :-  %bitcoin-client-block-header-by-hash
+    !>
+    ^-  block-header-by-hash:update
+        dat
+  ::
+      [%x %block-header %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    =/  haz  (get:on-bh-index bh-index het)
+    ?~  haz  ~^~
+    =/  hed  (~(get by block-headers) u.haz)
+    ?~  hed  ~^~
+    =/  dat
+      :_  block-header.u.hed
+      %:  make-block-info
+          het
+          u.haz
+          chainwork.u.hed
+      ==
+    :+  ~  ~
+    :-  %bitcoin-client-block-header-by-height
+    !>
+    ^-  block-header-by-height:update
+        dat
+  ::
+  ==
 ::
 ++  watch
   |=  poe=(pole @ta)

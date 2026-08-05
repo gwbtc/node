@@ -2,10 +2,10 @@ const app = 'bitcoin-client';
 const subPathsToActIds = {};
 const channelId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const channelPath = `${window.location.origin}/~/channel/${channelId}`;
+const scryBasePath = `${window.location.origin}/~/scry/${app}`;
 let our;
 let eventSource;
 let channelActId = 0;
-let suppressHeaderScroll = false;
 
 const explorerState = {
   bestBlock: null,
@@ -21,6 +21,7 @@ const explorerState = {
   headerSearchError: null,
   pendingHeaderSearch: null
 };
+let suppressHeaderScroll = false;
 const headerBatchSize = 20;
 const headerWindowSize = 60;
 const transactionBatchSize = 5;
