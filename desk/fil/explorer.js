@@ -6,8 +6,12 @@ const scryBasePath = `${window.location.origin}/~/scry/${app}`;
 let our;
 let eventSource;
 let channelActId = 0;
+let bestBlockSubscribed = false;
+let bestBlockPollTimer = null;
+let bestBlockPollInFlight = false;
 
 const explorerState = {
+  isSynced: null,
   bestBlock: null,
   headers: new Map(),
   headerHashesByHeight: new Map(),
@@ -25,6 +29,7 @@ let suppressHeaderScroll = false;
 const headerBatchSize = 20;
 const headerWindowSize = 60;
 const transactionBatchSize = 5;
+const bestBlockPollInterval = 3000;
 const headerPlaceholders = Array.from({ length: 6 }, (_, index) => ({
   id: `header-placeholder-${index}`,
   isPlaceholder: true
@@ -44,10 +49,7 @@ addEventListener('DOMContentLoaded', () => {
 });
 
 async function connectToShip() {
-  await sendActions([
-    makeSubscribe('/best-block'),
-    makeSubscribe('/is-synced')
-  ]);
+  await sendActions([makeSubscribe('/is-synced')]);
   eventSource = new EventSource(channelPath);
   eventSource.addEventListener('message', handleChannelStream);
 }
@@ -60,16 +62,12 @@ async function handleChannelStream(event) {
 
   // console.log(msg.mark);
 
-  if (msg.mark === 'bitcoin-client-best-block') {
+  if (msg.mark === 'bitcoin-client-is-synced') {
+    handleIsSynced(msg.json);
+  }
+
+  if (msg.mark === 'bitcoin-client-best-block' && bestBlockSubscribed) {
     handleBestBlock(msg.json);
-  }
-
-  if (msg.mark === 'bitcoin-client-block-header-by-height') {
-    handleBlockHeader(msg.json);
-  }
-
-  if (msg.mark === 'bitcoin-client-block-header-by-hash') {
-    handleBlockHeader(msg.json);
   }
 
   if (msg.mark === 'bitcoin-client-block-by-height') {
@@ -77,12 +75,102 @@ async function handleChannelStream(event) {
   }
 }
 
-function handleBestBlock(bestBlockJson) {
+function handleIsSynced(isSynced) {
+  const nextIsSynced = isSynced === true;
+  const syncStatusChanged = explorerState.isSynced !== nextIsSynced;
+  explorerState.isSynced = nextIsSynced;
+
+  if (explorerState.isSynced) {
+    stopBestBlockPolling();
+    subscribeToBestBlock();
+  } else {
+    unsubscribeFromBestBlock();
+    startBestBlockPolling();
+  }
+
+  if (syncStatusChanged) renderExplorer();
+}
+
+function subscribeToBestBlock() {
+  if (bestBlockSubscribed) return;
+
+  bestBlockSubscribed = true;
+  sendActions([makeSubscribe('/best-block')]);
+}
+
+function unsubscribeFromBestBlock() {
+  if (!bestBlockSubscribed) return;
+
+  bestBlockSubscribed = false;
+  sendActions([makeUnsubscribe('/best-block')]);
+}
+
+function stopBestBlockPolling() {
+  if (bestBlockPollTimer !== null) {
+    clearTimeout(bestBlockPollTimer);
+    bestBlockPollTimer = null;
+  }
+}
+
+function scheduleBestBlockPoll() {
+  if (explorerState.isSynced || bestBlockPollTimer !== null) return;
+
+  bestBlockPollTimer = setTimeout(() => {
+    bestBlockPollTimer = null;
+    pollBestBlock();
+  }, bestBlockPollInterval);
+}
+
+function startBestBlockPolling() {
+  if (explorerState.isSynced ||
+      bestBlockPollInFlight ||
+      bestBlockPollTimer !== null) {
+    return;
+  }
+
+  pollBestBlock();
+}
+
+async function pollBestBlock() {
+  if (explorerState.isSynced || bestBlockPollInFlight) return;
+
+  bestBlockPollInFlight = true;
+
+  try {
+    const response = await fetch(`${scryBasePath}/best-block.json`);
+    if (!response.ok) {
+      throw new Error(`Best block scry failed with status ${response.status}`);
+    }
+
+    const bestBlockJson = await response.json();
+    if (!explorerState.isSynced) {
+      handleBestBlock(bestBlockJson, { requireVisibleTip: true });
+    }
+  } catch {
+    // A later poll will retry while the light client is still syncing.
+  } finally {
+    bestBlockPollInFlight = false;
+    scheduleBestBlockPoll();
+  }
+}
+
+function headerRowIsAtStart() {
+  const row = document.querySelector('.block-header-row');
+  return !row || row.scrollLeft <= 1;
+}
+
+function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
   const previousBestBlock = explorerState.bestBlock;
-  explorerState.bestBlock = {
+  const nextBestBlock = {
     height: Number(bestBlockJson['block-height']),
     hash: bestBlockJson['block-hash']
   };
+  const bestBlockChanged = !previousBestBlock ||
+    previousBestBlock.height !== nextBestBlock.height ||
+    previousBestBlock.hash !== nextBestBlock.hash;
+
+  explorerState.bestBlock = nextBestBlock;
+  if (!bestBlockChanged) return;
 
   if (!explorerState.headerWindow) {
     const lowestHeight = Math.max(
@@ -97,7 +185,8 @@ function handleBestBlock(bestBlockJson) {
   }
 
   const wasAtTip = explorerState.headerWindow.highestHeight ===
-    previousBestBlock?.height;
+      previousBestBlock?.height &&
+    (!requireVisibleTip || headerRowIsAtStart());
 
   if (wasAtTip) {
     const highestHeight = explorerState.bestBlock.height;
@@ -109,7 +198,12 @@ function handleBestBlock(bestBlockJson) {
       lowestHeight = highestHeight - headerWindowSize + 1;
     }
 
-    setHeaderWindow({ highestHeight, lowestHeight });
+    setHeaderWindow(
+      { highestHeight, lowestHeight },
+      requireVisibleTip ? null : captureHeaderScrollAnchor()
+    );
+  } else {
+    renderExplorer();
   }
 
   const mayBeReorg = previousBestBlock &&
@@ -169,21 +263,60 @@ function handleBlockHeader(headerJson) {
   if (headerWindowHasHeight(height)) renderExplorer();
 }
 
-function requestHeaderRange(lowestHeight, highestHeight, force = false) {
-  const headerSubscriptions = [];
+async function scryBlockHeader(path) {
+  const response = await fetch(`${scryBasePath}${path}.json`);
+  if (!response.ok) {
+    throw new Error(`Header scry failed with status ${response.status}`);
+  }
+  return response.json();
+}
 
+function handleHeaderScryError(type, value) {
+  if (type === 'height') explorerState.pendingHeaderHeights.delete(value);
+
+  const pendingSearch = explorerState.pendingHeaderSearch;
+  const failedSearch = pendingSearch &&
+    pendingSearch.type === type &&
+    pendingSearch.value === value;
+  if (!failedSearch) return;
+
+  explorerState.pendingHeaderSearch = null;
+  explorerState.headerSearchError = 'Unable to load block header';
+  renderExplorer(pendingSearch.scrollAnchor ?? null);
+}
+
+async function scryBlockHeaderByHeight(height) {
+  try {
+    const hoonHeight = formatHoonDecimal(height);
+    const headerJson = await scryBlockHeader(
+      `/block-header/height/${hoonHeight}`
+    );
+    handleBlockHeader(headerJson);
+  } catch {
+    handleHeaderScryError('height', height);
+  }
+}
+
+async function scryBlockHeaderByHash(blockHash) {
+  try {
+    const hoonHash = formatHoonHex(blockHash);
+    const headerJson = await scryBlockHeader(
+      `/block-header/hash/${hoonHash}`
+    );
+    handleBlockHeader(headerJson);
+  } catch {
+    handleHeaderScryError('hash', blockHash);
+  }
+}
+
+function requestHeaderRange(lowestHeight, highestHeight, force = false) {
   for (let height = highestHeight; height >= lowestHeight; height--) {
     if (explorerState.pendingHeaderHeights.has(height)) continue;
     if (!force && getHeaderByHeight(explorerState, height)) continue;
 
     explorerState.pendingHeaderHeights.add(height);
-    const hoonHeight = formatHoonDecimal(height);
-    headerSubscriptions.push(
-      makeSubscribe(`/block-header/height/${hoonHeight}`)
-    );
+    scryBlockHeaderByHeight(height);
   }
-
-  if (headerSubscriptions.length > 0) sendActions(headerSubscriptions);
 }
 
 function setHeaderWindow(
@@ -314,9 +447,7 @@ function handleHeaderSearch(event) {
   if (type === 'height') {
     requestHeaderRange(value, value);
   } else {
-    sendActions([
-      makeSubscribe(`/block-header/hash/${formatHoonHex(value)}`)
-    ]);
+    scryBlockHeaderByHash(value);
   }
 }
 
@@ -785,7 +916,24 @@ function BlockHeaderPanel(headers, selectedBlock) {
   }, [
     element('header', { className: 'panel__header' }, [
       searchForm,
-      element('div', { className: 'network-badge', text: 'Bitcoin network' })
+      element('div', {
+        className: 'status-module',
+        attributes: {
+          role: 'status',
+          'aria-live': 'polite'
+        }
+      }, [
+        element('span', {
+          className: 'status-module__item status-module__item--network',
+          text: 'Bitcoin network'
+        }),
+        element('span', {
+          className: `status-module__item status-module__item--${
+            explorerState.isSynced ? 'synced' : 'syncing'
+          }`,
+          text: explorerState.isSynced ? 'Synced' : 'Syncing'
+        })
+      ])
     ]),
     headerViewport
   ]);
