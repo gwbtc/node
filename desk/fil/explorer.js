@@ -736,23 +736,28 @@ function makeChannelDelete() {
 }
 
 function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
-  let root = document.getElementById('explorer-root');
+  const nextRoot = element('div', {
+    key: 'explorer-root',
+    attributes: { id: 'explorer-root' }
+  }, [ExplorerApp(explorerState)]);
+  const root = document.getElementById('explorer-root');
 
   if (!root) {
-    root = element('div', {
-      attributes: { id: 'explorer-root' }
-    });
+    document.body.replaceChildren(nextRoot);
+  } else {
+    reconcileNode(root, nextRoot);
   }
 
-  document.body.replaceChildren(root);
-  root.replaceChildren(ExplorerApp(explorerState));
   restoreHeaderScrollAnchor(scrollAnchor);
 }
 
+const renderEventListeners = Symbol('renderEventListeners');
+
 function element(tagName, options = {}, children = []) {
   const node = document.createElement(tagName);
-  const { className, text, attributes = {} } = options;
+  const { key, className, text, attributes = {} } = options;
 
+  if (key !== undefined) node.setAttribute('data-render-key', key);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
 
@@ -764,9 +769,142 @@ function element(tagName, options = {}, children = []) {
   return node;
 }
 
+function listen(node, type, listener, options) {
+  node.addEventListener(type, listener, options);
+  node[renderEventListeners] ??= [];
+  node[renderEventListeners].push({ type, listener, options });
+  return node;
+}
+
+function renderKey(node) {
+  return node.nodeType === Node.ELEMENT_NODE
+    ? node.getAttribute('data-render-key')
+    : null;
+}
+
+function nodesMatch(currentNode, nextNode) {
+  if (currentNode.nodeType !== nextNode.nodeType) return false;
+  if (currentNode.nodeType !== Node.ELEMENT_NODE) return true;
+  if (currentNode.tagName !== nextNode.tagName) return false;
+
+  return renderKey(currentNode) === renderKey(nextNode);
+}
+
+function reconcileAttributes(currentElement, nextElement) {
+  const preserveOpenState = currentElement.tagName === 'DETAILS' &&
+    !nextElement.hasAttribute('open');
+
+  for (const attribute of Array.from(currentElement.attributes)) {
+    if (!nextElement.hasAttribute(attribute.name) &&
+        !(preserveOpenState && attribute.name === 'open')) {
+      currentElement.removeAttribute(attribute.name);
+    }
+  }
+
+  for (const attribute of Array.from(nextElement.attributes)) {
+    if (currentElement.getAttribute(attribute.name) !== attribute.value) {
+      currentElement.setAttribute(attribute.name, attribute.value);
+    }
+  }
+
+  if ((currentElement instanceof HTMLInputElement ||
+       currentElement instanceof HTMLTextAreaElement) &&
+      currentElement.value !== nextElement.value) {
+    currentElement.value = nextElement.value;
+  }
+}
+
+function reconcileEventListeners(currentElement, nextElement) {
+  for (const eventListener of currentElement[renderEventListeners] ?? []) {
+    currentElement.removeEventListener(
+      eventListener.type,
+      eventListener.listener,
+      eventListener.options
+    );
+  }
+
+  const nextEventListeners = nextElement[renderEventListeners] ?? [];
+  currentElement[renderEventListeners] = [];
+
+  for (const eventListener of nextEventListeners) {
+    listen(
+      currentElement,
+      eventListener.type,
+      eventListener.listener,
+      eventListener.options
+    );
+  }
+}
+
+function reconcileChildren(currentElement, nextElement) {
+  const currentChildren = Array.from(currentElement.childNodes);
+  const usedChildren = new Set();
+  const nextChildren = Array.from(nextElement.childNodes);
+
+  nextChildren.forEach((nextChild, index) => {
+    const nextKey = renderKey(nextChild);
+    let currentChild = null;
+
+    if (nextKey !== null) {
+      currentChild = currentChildren.find((child) =>
+        !usedChildren.has(child) && renderKey(child) === nextKey
+      ) ?? null;
+    } else {
+      const childAtIndex = currentChildren[index];
+      if (childAtIndex &&
+          !usedChildren.has(childAtIndex) &&
+          renderKey(childAtIndex) === null) {
+        currentChild = childAtIndex;
+      }
+    }
+
+    if (!currentChild || !nodesMatch(currentChild, nextChild)) {
+      currentElement.insertBefore(
+        nextChild,
+        currentElement.childNodes[index] ?? null
+      );
+      return;
+    }
+
+    usedChildren.add(currentChild);
+    const childAtTargetIndex = currentElement.childNodes[index];
+    if (childAtTargetIndex !== currentChild) {
+      currentElement.insertBefore(currentChild, childAtTargetIndex ?? null);
+    }
+    reconcileNode(currentChild, nextChild);
+  });
+
+  for (const currentChild of currentChildren) {
+    if (!usedChildren.has(currentChild) &&
+        currentChild.parentNode === currentElement) {
+      currentChild.remove();
+    }
+  }
+}
+
+function reconcileNode(currentNode, nextNode) {
+  if (!nodesMatch(currentNode, nextNode)) {
+    currentNode.replaceWith(nextNode);
+    return nextNode;
+  }
+
+  if (currentNode.nodeType === Node.TEXT_NODE) {
+    if (currentNode.nodeValue !== nextNode.nodeValue) {
+      currentNode.nodeValue = nextNode.nodeValue;
+    }
+    return currentNode;
+  }
+
+  reconcileAttributes(currentNode, nextNode);
+  reconcileEventListeners(currentNode, nextNode);
+  reconcileChildren(currentNode, nextNode);
+  return currentNode;
+}
+
 function BlockHeaderCard(header, selectedBlock) {
   if (header.isPlaceholder) {
     return element('article', {
+      key: `block-header-placeholder:${header.id}`,
       className: 'block-header-card block-header-card--placeholder',
       attributes: {
         'aria-hidden': 'true',
@@ -783,7 +921,9 @@ function BlockHeaderCard(header, selectedBlock) {
 
   const isSelected = selectedBlock?.height === header.height &&
     selectedBlock.hash === header.hash;
+  const cardKey = `block-header:${header.hash}`;
   const card = element('article', {
+    key: cardKey,
     className: `block-header-card${isSelected ? ' block-header-card--selected' : ''}`,
     attributes: {
       'data-block-hash': header.hash,
@@ -795,21 +935,24 @@ function BlockHeaderCard(header, selectedBlock) {
     }
   }, [
     element('p', {
+      key: `${cardKey}:height`,
       className: 'block-header-card__height',
       text: Number(header.height).toLocaleString()
     }),
     element('p', {
+      key: `${cardKey}:hash`,
       className: 'block-header-card__hash',
       text: header.hash
     }),
     element('p', {
+      key: `${cardKey}:time`,
       className: 'block-header-card__meta',
       text: formatBlockTime(header.time)
     })
   ]);
 
-  card.addEventListener('click', () => selectBlock(header));
-  card.addEventListener('keydown', (event) => {
+  listen(card, 'click', () => selectBlock(header));
+  listen(card, 'keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     selectBlock(header);
@@ -820,6 +963,7 @@ function BlockHeaderCard(header, selectedBlock) {
 
 function BlockHeaderPanel(headers, selectedBlock) {
   const searchInput = element('input', {
+    key: 'block-search-input',
     className: 'block-search',
     attributes: {
       type: 'search',
@@ -834,7 +978,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
       ...(explorerState.pendingHeaderSearch ? { disabled: '' } : {})
     }
   });
-  searchInput.addEventListener('input', (event) => {
+  listen(searchInput, 'input', (event) => {
     explorerState.headerSearchQuery = event.currentTarget.value;
     explorerState.headerSearchError = null;
     event.currentTarget.setAttribute('aria-invalid', 'false');
@@ -843,11 +987,13 @@ function BlockHeaderPanel(headers, selectedBlock) {
   });
 
   const searchForm = element('form', {
+    key: 'block-search-form',
     className: 'block-search-form',
     attributes: { role: 'search' }
   }, [
     searchInput,
     element('span', {
+      key: 'block-search-error',
       className: 'block-search-error',
       text: explorerState.headerSearchError ?? '',
       attributes: {
@@ -856,9 +1002,10 @@ function BlockHeaderPanel(headers, selectedBlock) {
       }
     })
   ]);
-  searchForm.addEventListener('submit', handleHeaderSearch);
+  listen(searchForm, 'submit', handleHeaderSearch);
 
   const headerRow = element('div', {
+    key: 'block-header-row',
     className: 'block-header-row',
     attributes: {
       role: 'group',
@@ -866,6 +1013,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
     }
   }, headers.map((header) => BlockHeaderCard(header, selectedBlock)));
   const bestBlockButton = element('button', {
+    key: 'best-block-button',
     className: 'block-header-tip-button',
     attributes: {
       type: 'button',
@@ -877,33 +1025,52 @@ function BlockHeaderPanel(headers, selectedBlock) {
     }
   }, [
     element('span', {
+      key: 'best-block-button:arrow',
       className: 'block-header-tip-button__arrow',
       text: '←',
       attributes: { 'aria-hidden': 'true' }
     }),
     element('span', {
+      key: 'best-block-button:height',
       className: 'block-header-tip-button__height',
       text: explorerState.bestBlock
         ? Number(explorerState.bestBlock.height).toLocaleString()
         : '—'
     })
   ]);
-  bestBlockButton.addEventListener('click', selectBestBlock);
-  headerRow.addEventListener(
+  listen(bestBlockButton, 'click', selectBestBlock);
+  listen(
+    headerRow,
     'scroll',
-    () => {
-      handleHeaderPanelScroll(headerRow);
-      updateBestBlockButtonVisibility(headerRow, bestBlockButton);
+    (event) => {
+      const currentHeaderRow = event.currentTarget;
+      const currentBestBlockButton = currentHeaderRow.parentElement
+        ?.querySelector('.block-header-tip-button');
+      handleHeaderPanelScroll(currentHeaderRow);
+      if (currentBestBlockButton) {
+        updateBestBlockButtonVisibility(
+          currentHeaderRow,
+          currentBestBlockButton
+        );
+      }
     },
     { passive: true }
   );
   requestAnimationFrame(() => {
-    if (headerRow.isConnected) {
-      updateBestBlockButtonVisibility(headerRow, bestBlockButton);
+    const currentHeaderRow = document.querySelector('.block-header-row');
+    const currentBestBlockButton = document.querySelector(
+      '.block-header-tip-button'
+    );
+    if (currentHeaderRow && currentBestBlockButton) {
+      updateBestBlockButtonVisibility(
+        currentHeaderRow,
+        currentBestBlockButton
+      );
     }
   });
 
   const headerViewport = element('div', {
+    key: 'block-header-viewport',
     className: 'block-header-viewport'
   }, [
     headerRow,
@@ -911,12 +1078,17 @@ function BlockHeaderPanel(headers, selectedBlock) {
   ]);
 
   return element('section', {
+    key: 'block-header-panel',
     className: 'panel block-header-panel',
     attributes: { 'aria-label': 'Block headers' }
   }, [
-    element('header', { className: 'panel__header' }, [
+    element('header', {
+      key: 'block-header-panel:controls',
+      className: 'panel__header'
+    }, [
       searchForm,
       element('div', {
+        key: 'status-module',
         className: 'status-module',
         attributes: {
           role: 'status',
@@ -924,10 +1096,12 @@ function BlockHeaderPanel(headers, selectedBlock) {
         }
       }, [
         element('span', {
+          key: 'status-module:network',
           className: 'status-module__item status-module__item--network',
           text: 'Bitcoin network'
         }),
         element('span', {
+          key: 'status-module:sync',
           className: `status-module__item status-module__item--${
             explorerState.isSynced ? 'synced' : 'syncing'
           }`,
@@ -939,103 +1113,179 @@ function BlockHeaderPanel(headers, selectedBlock) {
   ]);
 }
 
-function BlockDetailField(label, value) {
-  return element('div', { className: 'block-detail-field' }, [
-    element('dt', { className: 'block-detail-field__label', text: label }),
-    element('dd', { className: 'block-detail-field__value', text: value })
+function BlockDetailField(label, value, key) {
+  return element('div', {
+    key,
+    className: 'block-detail-field'
+  }, [
+    element('dt', {
+      key: `${key}:label`,
+      className: 'block-detail-field__label',
+      text: label
+    }),
+    element('dd', {
+      key: `${key}:value`,
+      className: 'block-detail-field__value',
+      text: value
+    })
   ]);
 }
 
 function BlockHeaderData(block) {
-  return element('div', { className: 'block-details' }, [
+  const blockKey = `block:${block.hash}`;
+
+  return element('div', {
+    key: `${blockKey}:details`,
+    className: 'block-details'
+  }, [
     element('section', {
+      key: `${blockKey}:chain-data`,
       className: 'block-details__section block-details__section--chain',
       attributes: { 'aria-label': 'Chain data' }
     }, [
       element('dl', { className: 'block-detail-list' }, [
         BlockDetailField(
           'Confirmations',
-          String(block.confirmations ?? 'Unavailable')
+          String(block.confirmations ?? 'Unavailable'),
+          `${blockKey}:confirmations`
         ),
-        BlockDetailField('Chainwork', block.chainwork)
+        BlockDetailField(
+          'Chainwork',
+          block.chainwork,
+          `${blockKey}:chainwork`
+        )
       ])
     ]),
     element('section', {
+      key: `${blockKey}:header-data`,
       className: 'block-details__section',
       attributes: { 'aria-labelledby': 'block-header-fields-title' }
     }, [
       element('h3', {
+        key: `${blockKey}:header-data:title`,
         className: 'block-details__title',
         text: 'Block header',
         attributes: { id: 'block-header-fields-title' }
       }),
       element('dl', { className: 'block-detail-list' }, [
-        BlockDetailField('Version', block.version),
-        BlockDetailField('Previous block hash', block.previousBlockHash),
-        BlockDetailField('Merkle root', block.merkleRoot),
+        BlockDetailField(
+          'Version',
+          block.version,
+          `${blockKey}:version`
+        ),
+        BlockDetailField(
+          'Previous block hash',
+          block.previousBlockHash,
+          `${blockKey}:previous-block-hash`
+        ),
+        BlockDetailField(
+          'Merkle root',
+          block.merkleRoot,
+          `${blockKey}:merkle-root`
+        ),
         BlockDetailField(
           'Time',
-          `${block.time} · ${formatBlockTime(block.time)}`
+          `${block.time} · ${formatBlockTime(block.time)}`,
+          `${blockKey}:time`
         ),
-        BlockDetailField('Bits', block.bits),
-        BlockDetailField('Nonce', block.nonce)
+        BlockDetailField('Bits', block.bits, `${blockKey}:bits`),
+        BlockDetailField('Nonce', block.nonce, `${blockKey}:nonce`)
       ])
     ])
   ]);
 }
 
-function TransactionInput(input, index) {
-  return element('li', { className: 'transaction-io__item' }, [
+function TransactionInput(input, index, transactionKey) {
+  const inputKey = `${transactionKey}:input:${index}`;
+  return element('li', {
+    key: inputKey,
+    className: 'transaction-io__item'
+  }, [
     element('span', {
+      key: `${inputKey}:label`,
       className: 'transaction-io__index',
       text: `Input ${index + 1}`
     }),
     element('code', {
+      key: `${inputKey}:value`,
       className: 'transaction-io__value',
       text: `${input.txid}:${input.vout}`
     })
   ]);
 }
 
-function TransactionOutput(output, index) {
-  return element('li', { className: 'transaction-io__item' }, [
+function TransactionOutput(output, index, transactionKey) {
+  const outputKey = `${transactionKey}:output:${index}`;
+  return element('li', {
+    key: outputKey,
+    className: 'transaction-io__item'
+  }, [
     element('span', {
+      key: `${outputKey}:label`,
       className: 'transaction-io__index',
       text: `Output ${index + 1} · ${Number(output.value).toLocaleString()} sats`
     }),
     element('code', {
+      key: `${outputKey}:value`,
       className: 'transaction-io__value',
       text: output['script-pubkey']
     })
   ]);
 }
 
-function TransactionCard(transaction, index) {
+function TransactionCard(transaction, index, blockHash) {
   const inputs = transaction.inputs ?? [];
   const outputs = transaction.outputs ?? [];
+  const transactionKey = `block:${blockHash}:transaction:${index}`;
 
-  return element('details', { className: 'transaction-card' }, [
-    element('summary', { className: 'transaction-card__summary' }, [
+  return element('details', {
+    key: transactionKey,
+    className: 'transaction-card'
+  }, [
+    element('summary', {
+      key: `${transactionKey}:summary`,
+      className: 'transaction-card__summary'
+    }, [
       element('span', {
+        key: `${transactionKey}:title`,
         className: 'transaction-card__title',
         text: `Transaction ${index + 1}`
       }),
       element('span', {
+        key: `${transactionKey}:counts`,
         className: 'transaction-card__counts',
         text: `${inputs.length} inputs · ${outputs.length} outputs`
       })
     ]),
-    element('div', { className: 'transaction-card__body' }, [
+    element('div', {
+      key: `${transactionKey}:body`,
+      className: 'transaction-card__body'
+    }, [
       element('p', {
+        key: `${transactionKey}:metadata`,
         className: 'transaction-card__meta',
         text: `Version ${transaction.version} · Locktime ${transaction.locktime}`
       }),
-      element('h4', { className: 'transaction-io__title', text: 'Inputs' }),
-      element('ul', { className: 'transaction-io' },
-        inputs.map(TransactionInput)),
-      element('h4', { className: 'transaction-io__title', text: 'Outputs' }),
-      element('ul', { className: 'transaction-io' },
-        outputs.map(TransactionOutput))
+      element('h4', {
+        key: `${transactionKey}:inputs:title`,
+        className: 'transaction-io__title',
+        text: 'Inputs'
+      }),
+      element('ul', {
+        key: `${transactionKey}:inputs`,
+        className: 'transaction-io'
+      }, inputs.map((input, inputIndex) =>
+        TransactionInput(input, inputIndex, transactionKey))),
+      element('h4', {
+        key: `${transactionKey}:outputs:title`,
+        className: 'transaction-io__title',
+        text: 'Outputs'
+      }),
+      element('ul', {
+        key: `${transactionKey}:outputs`,
+        className: 'transaction-io'
+      }, outputs.map((output, outputIndex) =>
+        TransactionOutput(output, outputIndex, transactionKey)))
     ])
   ]);
 }
@@ -1045,8 +1295,9 @@ function changeTransactionPage(page, pageCount) {
   renderExplorer();
 }
 
-function TransactionPaginationButton(label, text, disabled, onClick) {
+function TransactionPaginationButton(key, label, text, disabled, onClick) {
   const button = element('button', {
+    key,
     className: 'transaction-pagination__button',
     text,
     attributes: {
@@ -1056,11 +1307,11 @@ function TransactionPaginationButton(label, text, disabled, onClick) {
     }
   });
 
-  if (!disabled) button.addEventListener('click', onClick);
+  if (!disabled) listen(button, 'click', onClick);
   return button;
 }
 
-function TransactionList(transactions, currentPage) {
+function TransactionList(transactions, currentPage, blockHash) {
   const pageCount = Math.max(
     1,
     Math.ceil(transactions.length / transactionBatchSize)
@@ -1073,39 +1324,52 @@ function TransactionList(transactions, currentPage) {
   );
 
   return element('section', {
+    key: `block:${blockHash}:transactions`,
     className: 'block-transactions',
     attributes: { 'aria-labelledby': 'block-transactions-title' }
   }, [
-    element('header', { className: 'block-transactions__header' }, [
+    element('header', {
+      key: `block:${blockHash}:transactions:header`,
+      className: 'block-transactions__header'
+    }, [
       element('h3', {
+        key: `block:${blockHash}:transactions:title`,
         className: 'block-transactions__title',
         text: 'Transactions',
         attributes: { id: 'block-transactions-title' }
       }),
       element('span', {
+        key: `block:${blockHash}:transactions:count`,
         className: 'block-transactions__count',
         text: String(transactions.length)
       })
     ]),
-    element('div', { className: 'transaction-list' },
+    element('div', {
+      key: `block:${blockHash}:transaction-list`,
+      className: 'transaction-list'
+    },
       visibleTransactions.map((transaction, index) =>
-        TransactionCard(transaction, firstTransaction + index))),
+        TransactionCard(transaction, firstTransaction + index, blockHash))),
     element('nav', {
+      key: `block:${blockHash}:transaction-pagination`,
       className: 'transaction-pagination',
       attributes: { 'aria-label': 'Transaction pages' }
     }, [
       TransactionPaginationButton(
+        `block:${blockHash}:transactions:previous`,
         'Previous transactions',
         '←',
         page === 0,
         () => changeTransactionPage(page - 1, pageCount)
       ),
       element('span', {
+        key: `block:${blockHash}:transactions:page`,
         className: 'transaction-pagination__status',
         text: `${page + 1} / ${pageCount}`,
         attributes: { 'aria-live': 'polite' }
       }),
       TransactionPaginationButton(
+        `block:${blockHash}:transactions:next`,
         'Next transactions',
         '→',
         page === pageCount - 1,
@@ -1115,8 +1379,9 @@ function TransactionList(transactions, currentPage) {
   ]);
 }
 
-function BlockLoadingIndicator() {
+function BlockLoadingIndicator(blockHash) {
   return element('div', {
+    key: `block:${blockHash}:loading`,
     className: 'block-data-loading',
     attributes: {
       role: 'status',
@@ -1124,10 +1389,14 @@ function BlockLoadingIndicator() {
     }
   }, [
     element('span', {
+      key: `block:${blockHash}:loading:spinner`,
       className: 'block-data-loading__spinner',
       attributes: { 'aria-hidden': 'true' }
     }),
-    element('span', { text: 'Loading transactions…' })
+    element('span', {
+      key: `block:${blockHash}:loading:label`,
+      text: 'Loading transactions…'
+    })
   ]);
 }
 
@@ -1160,6 +1429,7 @@ async function copyTextToClipboard(text) {
 
 function CopyBlockHashButton(blockHash) {
   const button = element('button', {
+    key: `block:${blockHash}:copy-hash`,
     className: 'block-data-panel__copy',
     text: 'Copy',
     attributes: {
@@ -1169,16 +1439,17 @@ function CopyBlockHashButton(blockHash) {
     }
   });
 
-  button.addEventListener('click', async () => {
+  listen(button, 'click', async (event) => {
+    const copyButton = event.currentTarget;
     try {
       await copyTextToClipboard(blockHash);
-      button.textContent = 'Copied';
+      copyButton.textContent = 'Copied';
     } catch (error) {
-      button.textContent = 'Copy failed';
+      copyButton.textContent = 'Copy failed';
     }
 
     setTimeout(() => {
-      if (button.isConnected) button.textContent = 'Copy';
+      if (copyButton.isConnected) copyButton.textContent = 'Copy';
     }, 1_500);
   });
 
@@ -1186,30 +1457,45 @@ function CopyBlockHashButton(blockHash) {
 }
 
 function BlockDataPanel(block, blockData, transactionPage) {
+  const blockKey = block ? `block:${block.hash}` : 'block:none';
   const content = block
-    ? element('div', { className: 'block-data-content' }, [
+    ? element('div', {
+        key: `${blockKey}:content`,
+        className: 'block-data-content'
+      }, [
         BlockHeaderData(block),
         blockData
-          ? TransactionList(blockData.transactions, transactionPage)
-          : BlockLoadingIndicator()
+          ? TransactionList(
+              blockData.transactions,
+              transactionPage,
+              block.hash
+            )
+          : BlockLoadingIndicator(block.hash)
       ])
-    : element('div', { className: 'block-data-empty' }, [
+    : element('div', {
+        key: 'block-data-empty',
+        className: 'block-data-empty'
+      }, [
         element('div', {
+          key: 'block-data-empty:icon',
           className: 'block-data-empty__icon',
           text: '₿',
           attributes: { 'aria-hidden': 'true' }
         }),
         element('h3', {
+          key: 'block-data-empty:title',
           className: 'block-data-empty__title',
           text: 'No block selected'
         }),
         element('p', {
+          key: 'block-data-empty:copy',
           className: 'block-data-empty__copy',
           text: 'Select a header above to inspect its block data.'
         })
       ]);
 
   return element('section', {
+    key: 'block-data-panel',
     className: 'panel block-data-panel',
     attributes: block
       ? { 'aria-labelledby': 'block-data-title' }
@@ -1217,21 +1503,28 @@ function BlockDataPanel(block, blockData, transactionPage) {
   }, [
     block
       ? element('header', {
+          key: `${blockKey}:panel-header`,
           className: 'panel__header block-data-panel__header'
         }, [
           element('h2', {
+            key: `${blockKey}:panel-title`,
             className: 'block-data-panel__title',
             text: 'Block',
             attributes: { id: 'block-data-title' }
           }),
-          element('div', { className: 'block-data-panel__hash-group' }, [
+          element('div', {
+            key: `${blockKey}:hash-group`,
+            className: 'block-data-panel__hash-group'
+          }, [
             element('code', {
+              key: `${blockKey}:hash`,
               className: 'block-data-panel__hash',
               text: block.hash
             }),
             CopyBlockHashButton(block.hash)
           ]),
           element('span', {
+            key: `${blockKey}:height`,
             className: 'block-data-panel__height',
             text: `Height ${Number(block.height).toLocaleString()}`
           })
@@ -1246,14 +1539,27 @@ function ExplorerApp(state) {
     ? state.blocks.get(state.selectedBlock.hash)
     : null;
 
-  return element('main', { className: 'explorer' }, [
-    element('header', { className: 'explorer__header' }, [
-      element('h1', { className: 'explorer__title' }, [
+  return element('main', {
+    key: 'explorer',
+    className: 'explorer'
+  }, [
+    element('header', {
+      key: 'explorer-header',
+      className: 'explorer__header'
+    }, [
+      element('h1', {
+        key: 'explorer-title',
+        className: 'explorer__title'
+      }, [
         element('span', {
+          key: 'explorer-title:initials',
           className: 'explorer__initials',
           text: 'GW'
         }),
-        element('span', { text: '%explorer' })
+        element('span', {
+          key: 'explorer-title:name',
+          text: '%explorer'
+        })
       ])
     ]),
     BlockHeaderPanel(visibleHeaders(state), state.selectedBlock),
