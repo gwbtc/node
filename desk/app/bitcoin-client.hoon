@@ -18,28 +18,6 @@
       tx-inv-broadcast-retry-interval=@dr
       tx-broadcast-cache-expiration=@dr
   ==
-+$  earth-addresses
-  %+  map
-      earth-address
-  $:  last-heard=time
-      =services:b-net
-  ==
-+$  earth-address
-  $:  net-id=network-address-id:b-net
-      address=@ux
-      port=@ud
-  ==
-+$  earth-peers  (map earth-address earth-peer-state)
-+$  earth-peer-state
-  $:  handshake-done=_|
-      wtxidrelay=_|
-      starting-height=block-height
-      =services:b-net
-      last-heard=time
-      outbound-ping=(unit [=time nonce=@ux])
-      buffer=hexb
-  ==
-+$  blacklist  (map earth-address time)
 ::
 +$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
 +$  pending-block-height-reqs  (jug block-height pending-block-height-req)
@@ -184,6 +162,11 @@
   ?>  =(src.bowl our.bowl)
   ?+  poe  ~
   ::
+      [%x %network ~]
+    :+  ~  ~
+    :-  %bitcoin-client-network
+    !>  network
+  ::
       [%x %is-synced ~]
     :+  ~  ~
     :-  %bitcoin-client-is-synced
@@ -236,6 +219,17 @@
     !>
     ^-  block-header-by-height:update
         dat
+  ::
+      [%x %peers ~]
+    :+  ~  ~
+    :-  %bitcoin-client-peers
+    !>
+    ^-  peers:update
+    :-  %all
+    %-  ~(urn by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+    %-  make-earth-peer-info
+        erd
   ::
   ==
 ::
@@ -428,6 +422,15 @@
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
   ::
+      [%peers ~]
+    %-  emit
+    %-  ~(peers make-update ~^src.bowl)
+    :-  %all
+    %-  ~(urn by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+    %-  make-earth-peer-info
+        erd
+  ::
   ==
 ::
 ++  leave
@@ -456,7 +459,7 @@
       %+  disconnect-peer  &  erp  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
     =/  nun  (~(rad og eny.bowl) (lsh [3 8] 1))
     =.  outbound-ping.u.erd  [~ now.bowl nun]
-    =.  earth-peers  (~(put by earth-peers) erp u.erd)
+    =.  cor  (update-peer erp u.erd)
     %-  emil
     :-  (set-ping-timer erp)
     :_  ~
@@ -590,9 +593,9 @@
     ::
         %receive
       :: ~&  %tcp-receive
-      =.  last-heard.erd  now.bowl
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
-      =.  earth-peers  (~(put by earth-peers) erp erd)
+      =?  last-heard.erd  .?(mes)  ~^now.bowl
+      =.  cor  (update-peer erp erd)
       |-
       ?~  mes  cor
       :: ~&  -.i.mes
@@ -720,6 +723,15 @@
       het  ?:((lth les het) (sub het les) 0)
   ==
 ::
+++  make-earth-peer-info
+  |=  erd=earth-peer-state
+  ^-  earth-peer-info
+  :*  handshake-done.erd
+      wtxidrelay.erd
+      services.erd
+      last-heard.erd
+  ==
+::
 ++  make-update
   |_  for=(unit ship)
   ::
@@ -818,6 +830,12 @@
           end
       ==
     --
+  ::
+  ++  peers
+    |=  dat=peers:update
+    ^-  card
+    =/  paf  /peers
+    %+  fact  paf  [%bitcoin-client-peers !>(dat)]
   ::
   ++  fact  |=([paf=path cag=cage] `card`[%give %fact ?-(for ~ paf^~, ^ ~) cag])
   ++  kick  |=(paf=path `card`[%give %kick paf^~ for])
@@ -1001,7 +1019,15 @@
   ~&  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
-  =.  earth-peers  (~(put by earth-peers) erp *earth-peer-state)
+  =/  erd  *earth-peer-state
+  =.  earth-peers  (~(put by earth-peers) erp erd)
+  =.  cor
+    %-  emit
+    %-  ~(peers make-update ~)
+    :+  %put
+        erp
+    %-  make-earth-peer-info
+        erd
   %-  emil
   %-  open:tcp
       erp
@@ -1018,6 +1044,24 @@
   %=  $
       ads  t.ads
   ==
+::
+++  update-peer
+  |=  [erp=earth-address erd=earth-peer-state]
+  ^+  cor
+  =/  old  (~(got by earth-peers) erp)
+  =.  earth-peers  (~(put by earth-peers) erp erd)
+  ?:  ?&  =(handshake-done.erd handshake-done.old)
+          =(wtxidrelay.erd wtxidrelay.old)
+          =(services.erd services.old)
+          =(last-heard.erd last-heard.old)
+      ==
+    cor
+  %-  emit
+  %-  ~(peers make-update ~)
+  :+  %put
+      erp
+  %-  make-earth-peer-info
+      erd
 ::
 ++  disconnect-peer
   |=  [ban=? erp=earth-address]
@@ -1042,6 +1086,11 @@
       ==
     ::
     ==
+  =.  cor
+    %-  emit
+    %-  ~(peers make-update ~)
+    :-  %del
+        erp
   =.  cor  connect-to-more-peers
   ?:  have-live-peers  cor
   ?.  was-synced  cor
@@ -1157,13 +1206,14 @@
             !(~(has by blacklist) erp)
         ==
       =/  tim  (de-earth-time time.adr)
-      =/  erd  (~(get by earth-addresses) erp)
+      =/  old  (~(get by earth-addresses) erp)
       %+  ~(put by earth-addresses)
           erp
-      ?~  erd  [tim services.adr]
-      ?:  (lte tim last-heard.u.erd)  u.erd
-      :-  tim
-          services.adr
+      ?~  old  [tim services.adr]
+      =?  last-heard.u.old
+          |(?=(~ last-heard.u.old) (gth tim u.last-heard.u.old))
+          ~^tim
+      u.old
     %=  $
         ads  t.ads
     ==
@@ -1195,7 +1245,7 @@
     =:  services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
-    =.  earth-peers  (~(put by earth-peers) erp erd)
+    =.  cor  (update-peer erp erd)
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
@@ -1210,9 +1260,7 @@
           &
           erp
     =.  wtxidrelay.erd  &
-    %_  cor
-        earth-peers  (~(put by earth-peers) erp erd)
-    ==
+    %+  update-peer  erp  erd
   ::
       %verack
     ~&  >  msg
@@ -1221,7 +1269,7 @@
           &
           erp
     =.  handshake-done.erd  &
-    =.  earth-peers  (~(put by earth-peers) erp erd)
+    =.  cor  (update-peer erp erd)
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
@@ -1243,9 +1291,7 @@
     ?.  handshake-done.erd  (disconnect-peer & erp)
     ?~  outbound-ping.erd  cor
     ?.  =(nonce.msg nonce.u.outbound-ping.erd)  cor
-    %_  cor
-        earth-peers  (~(put by earth-peers) erp erd(outbound-ping ~))
-    ==
+    %+  update-peer  erp  erd(outbound-ping ~)
   ::
       %addr
     ~&  >>  [%addr (lent addresses.msg)]

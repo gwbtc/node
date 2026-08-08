@@ -11,12 +11,14 @@ let bestBlockPollTimer = null;
 let bestBlockPollInFlight = false;
 
 const explorerState = {
+  network: null,
   isSynced: null,
   bestBlock: null,
   headers: new Map(),
   headerHashesByHeight: new Map(),
   headerWindow: null,
   pendingHeaderHeights: new Set(),
+  peers: null,
   blocks: new Map(),
   pendingBlocks: new Set(),
   selectedBlock: null,
@@ -30,6 +32,14 @@ const headerBatchSize = 20;
 const headerWindowSize = 60;
 const transactionBatchSize = 5;
 const bestBlockPollInterval = 3000;
+const peerServiceLabels = {
+  'node-network': 'Network',
+  'node-bloom': 'Bloom',
+  'node-witness': 'Witness',
+  'node-compact-filters': 'Compact filters',
+  'node-network-limited': 'Limited network',
+  'node-p2p-v2': 'P2P v2'
+};
 const headerPlaceholders = Array.from({ length: 6 }, (_, index) => ({
   id: `header-placeholder-${index}`,
   isPlaceholder: true
@@ -42,14 +52,36 @@ const searchHeaderPlaceholders = Array.from(
   })
 );
 
-addEventListener('DOMContentLoaded', () => {
+addEventListener('DOMContentLoaded', async () => {
   our = document.documentElement.getAttribute('our');
   renderExplorer();
-  connectToShip();
+  const hasValidNetwork = await scryNetwork();
+  if (hasValidNetwork) connectToShip();
 });
 
+async function scryNetwork() {
+  try {
+    const response = await fetch(`${scryBasePath}/network.json`);
+    if (!response.ok) {
+      throw new Error(`Network scry failed with status ${response.status}`);
+    }
+
+    const network = await response.json();
+    if (network !== 'mainnet' && network !== 'regtest') return false;
+
+    explorerState.network = network;
+    renderExplorer();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function connectToShip() {
-  await sendActions([makeSubscribe('/is-synced')]);
+  await sendActions([
+    makeSubscribe('/is-synced'),
+    makeSubscribe('/peers')
+  ]);
   eventSource = new EventSource(channelPath);
   eventSource.addEventListener('message', handleChannelStream);
 }
@@ -70,9 +102,45 @@ async function handleChannelStream(event) {
     handleBestBlock(msg.json);
   }
 
+  if (msg.mark === 'bitcoin-client-peers') {
+    handlePeers(msg.json);
+  }
+
   if (msg.mark === 'bitcoin-client-block-by-height') {
     handleBlock(msg.json);
   }
+}
+
+function peerKey(address) {
+  return `${address['network-id']}:${address.address}:${address.port}`;
+}
+
+function cachePeer(address, info) {
+  if (!address || !info) return;
+  const key = peerKey(address);
+  explorerState.peers ??= new Map();
+  explorerState.peers.set(key, { key, address, info });
+}
+
+function handlePeers(peersUpdate) {
+  if (!peersUpdate || typeof peersUpdate.type !== 'string') return;
+
+  if (peersUpdate.type === 'all') {
+    explorerState.peers = new Map();
+    for (const peer of peersUpdate.peers ?? []) {
+      cachePeer(peer.address, peer.info);
+    }
+    if (explorerState.peers.size === 0) explorerState.peers = null;
+  } else if (peersUpdate.type === 'put') {
+    cachePeer(peersUpdate.address, peersUpdate.info);
+  } else if (peersUpdate.type === 'del' && peersUpdate.address) {
+    explorerState.peers?.delete(peerKey(peersUpdate.address));
+    if (explorerState.peers?.size === 0) explorerState.peers = null;
+  } else {
+    return;
+  }
+
+  renderExplorer();
 }
 
 function handleIsSynced(isSynced) {
@@ -676,6 +744,14 @@ function formatBlockTime(timestamp) {
   return Number.isNaN(date.getTime()) ? 'Time unavailable' : date.toLocaleString();
 }
 
+function formatNetworkName(network) {
+  return network.charAt(0).toUpperCase() + network.slice(1);
+}
+
+function hasNetworkConnection(state) {
+  return state.network !== null && state.peers !== null;
+}
+
 function sendActions(actArray) {
   return fetch(channelPath, {
     method: 'PUT',
@@ -1097,8 +1173,12 @@ function BlockHeaderPanel(headers, selectedBlock) {
       }, [
         element('span', {
           key: 'status-module:network',
-          className: 'status-module__item status-module__item--network',
-          text: 'Bitcoin network'
+          className: `status-module__item status-module__item--network-${
+            hasNetworkConnection(explorerState) ? 'connected' : 'disconnected'
+          }`,
+          text: explorerState.network
+            ? `Bitcoin ${formatNetworkName(explorerState.network)}`
+            : 'Bitcoin Network'
         }),
         element('span', {
           key: 'status-module:sync',
@@ -1456,6 +1536,230 @@ function CopyBlockHashButton(blockHash) {
   return button;
 }
 
+function addressBytes(hexAddress) {
+  const hex = String(hexAddress ?? '').replace(/^0x/i, '');
+  if (hex.length === 0 || hex.length % 2 !== 0 ||
+      !/^[0-9a-f]+$/i.test(hex)) return null;
+
+  return Array.from(
+    { length: hex.length / 2 },
+    (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16)
+  );
+}
+
+function formatIpv6Address(bytes) {
+  if (bytes.length !== 16) return null;
+  const groups = Array.from({ length: 8 }, (_, index) =>
+    ((bytes[index * 2] << 8) | bytes[index * 2 + 1]).toString(16));
+  let longestStart = -1;
+  let longestLength = 0;
+
+  for (let index = 0; index < groups.length;) {
+    if (groups[index] !== '0') {
+      index++;
+      continue;
+    }
+
+    let end = index;
+    while (end < groups.length && groups[end] === '0') end++;
+    if (end - index > longestLength) {
+      longestStart = index;
+      longestLength = end - index;
+    }
+    index = end;
+  }
+
+  if (longestLength < 2) return groups.join(':');
+  const before = groups.slice(0, longestStart).join(':');
+  const after = groups.slice(longestStart + longestLength).join(':');
+  return `${before}::${after}`;
+}
+
+function formatBase32(bytes) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  let bits = 0;
+  let bitCount = 0;
+  let encoded = '';
+
+  for (const byte of bytes) {
+    bits = (bits << 8) | byte;
+    bitCount += 8;
+    while (bitCount >= 5) {
+      encoded += alphabet[(bits >>> (bitCount - 5)) & 31];
+      bitCount -= 5;
+    }
+    bits &= (1 << bitCount) - 1;
+  }
+
+  if (bitCount > 0) encoded += alphabet[(bits << (5 - bitCount)) & 31];
+  return encoded;
+}
+
+function formatPeerAddress(address) {
+  const networkId = address['network-id'];
+  const bytes = addressBytes(address.address);
+  if (!bytes) return address.address ?? 'Unknown';
+
+  if (networkId === 'ipv4' && bytes.length === 4) {
+    return bytes.join('.');
+  }
+  if (networkId === 'ipv6' ||
+      networkId === 'cjdns' ||
+      networkId === 'yggdrasil') {
+    return formatIpv6Address(bytes) ?? address.address;
+  }
+  if (networkId === 'torv2') return `${formatBase32(bytes)}.onion`;
+  if (networkId === 'torv3') return formatBase32(bytes);
+  if (networkId === 'i2p') return `${formatBase32(bytes)}.b32.i2p`;
+  return address.address;
+}
+
+function peerEndpoint(address) {
+  const networkId = address['network-id'];
+  const host = formatPeerAddress(address);
+  const isIpv6Address = networkId === 'ipv6' ||
+    networkId === 'cjdns' ||
+    networkId === 'yggdrasil';
+  return `${isIpv6Address ? `[${host}]` : host}:${address.port}`;
+}
+
+function activePeerServices(services = {}) {
+  return Object.entries(peerServiceLabels)
+    .filter(([service]) => services[service])
+    .map(([, label]) => label);
+}
+
+function PeerCard(peer) {
+  const { key, address, info } = peer;
+  const isActive = info['handshake-done'] === true;
+  const lastHeard = info['last-heard'];
+  const services = [
+    ...activePeerServices(info.services),
+    ...(info.wtxidrelay ? ['WTXID relay'] : [])
+  ];
+  const peerRenderKey = `peer:${key}`;
+
+  return element('article', {
+    key: peerRenderKey,
+    className: `peer-card${isActive ? '' : ' peer-card--connecting'}`,
+    attributes: {
+      'aria-label': `${peerEndpoint(address)}, ${
+        isActive ? 'active' : 'connecting'
+      }`
+    }
+  }, [
+    element('header', {
+      key: `${peerRenderKey}:header`,
+      className: 'peer-card__header'
+    }, [
+      element('span', {
+        key: `${peerRenderKey}:connection-light`,
+        className: `peer-card__connection-light peer-card__connection-light--${
+          isActive ? 'active' : 'connecting'
+        }`,
+        attributes: { 'aria-hidden': 'true' }
+      }),
+      element('code', {
+        key: `${peerRenderKey}:endpoint`,
+        className: 'peer-card__endpoint',
+        text: peerEndpoint(address)
+      }),
+      element('span', {
+        key: `${peerRenderKey}:network-id`,
+        className: 'peer-card__network-id',
+        text: String(address['network-id'] ?? 'unknown').toUpperCase()
+      })
+    ]),
+    element('dl', {
+      key: `${peerRenderKey}:metadata`,
+      className: 'peer-card__metadata'
+    }, [
+      element('div', {
+        key: `${peerRenderKey}:last-heard`,
+        className: 'peer-card__field'
+      }, [
+        element('dt', {
+          key: `${peerRenderKey}:last-heard:label`,
+          text: 'Last heard'
+        }),
+        element('dd', {
+          key: `${peerRenderKey}:last-heard:value`,
+          text: lastHeard === null
+            ? 'Unavailable'
+            : formatBlockTime(Number(lastHeard))
+        })
+      ])
+    ]),
+    element('div', {
+      key: `${peerRenderKey}:services`,
+      className: 'peer-card__services',
+      attributes: { 'aria-label': 'Advertised services' }
+    }, (services.length > 0 ? services : ['No services']).map((service) =>
+      element('span', {
+        key: `${peerRenderKey}:service:${service}`,
+        className: 'peer-card__service',
+        text: service
+      })))
+  ]);
+}
+
+function PeersPanel(peers) {
+  const visiblePeers = Array.from(peers?.values() ?? []).sort((first, second) => {
+    const activeDifference = Number(second.info['handshake-done']) -
+      Number(first.info['handshake-done']);
+    return activeDifference || first.key.localeCompare(second.key);
+  });
+  const activePeerCount = visiblePeers.filter(
+    (peer) => peer.info['handshake-done']
+  ).length;
+
+  return element('section', {
+    key: 'peers-panel',
+    className: 'panel peers-panel',
+    attributes: { 'aria-labelledby': 'peers-panel-title' }
+  }, [
+    element('header', {
+      key: 'peers-panel:header',
+      className: 'panel__header peers-panel__header'
+    }, [
+      element('h2', {
+        key: 'peers-panel:title',
+        className: 'peers-panel__title',
+        text: 'Peers',
+        attributes: { id: 'peers-panel-title' }
+      }),
+      element('span', {
+        key: 'peers-panel:count',
+        className: 'peers-panel__count',
+        text: `${activePeerCount} / ${visiblePeers.length}`,
+        attributes: {
+          title: 'Active peers / total peers',
+          'aria-label': `${activePeerCount} active of ${visiblePeers.length} peers`
+        }
+      })
+    ]),
+    visiblePeers.length > 0
+      ? element('div', {
+          key: 'peers-panel:list',
+          className: 'peers-panel__list'
+        }, visiblePeers.map(PeerCard))
+      : element('div', {
+          key: 'peers-panel:empty',
+          className: 'peers-panel__empty'
+        }, [
+          element('span', {
+            key: 'peers-panel:empty:indicator',
+            className: 'peers-panel__empty-indicator',
+            attributes: { 'aria-hidden': 'true' }
+          }),
+          element('p', {
+            key: 'peers-panel:empty:copy',
+            text: 'Waiting for peer connections…'
+          })
+        ])
+  ]);
+}
+
 function BlockDataPanel(block, blockData, transactionPage) {
   const blockKey = block ? `block:${block.hash}` : 'block:none';
   const content = block
@@ -1563,6 +1867,12 @@ function ExplorerApp(state) {
       ])
     ]),
     BlockHeaderPanel(visibleHeaders(state), state.selectedBlock),
-    BlockDataPanel(state.selectedBlock, blockData, state.transactionPage)
+    element('div', {
+      key: 'explorer-lower-region',
+      className: 'explorer__lower-region'
+    }, [
+      PeersPanel(state.peers),
+      BlockDataPanel(state.selectedBlock, blockData, state.transactionPage)
+    ])
   ]);
 }

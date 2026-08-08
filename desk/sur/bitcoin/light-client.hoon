@@ -2,6 +2,40 @@
     b-net=bitcoin-network
 |%
 ::
++$  earth-addresses
+  %+  map
+      earth-address
+  $:  =last-heard
+      =services:b-net
+  ==
++$  earth-address
+  $:  net-id=network-address-id:b-net
+      address=@ux
+      port=@ud
+  ==
++$  blacklist  (map earth-address time)
++$  earth-peers
+  %+  map
+      earth-address
+      earth-peer-state
++$  earth-peer-state
+  $:  handshake-done=_|
+      wtxidrelay=_|
+      starting-height=block-height
+      =services:b-net
+      =last-heard
+      outbound-ping=(unit [=time nonce=@ux])
+      buffer=hexb
+  ==
+::
++$  earth-peer-info
+  $:  handshake-done=_|
+      wtxidrelay=_|
+      =services:b-net
+      =last-heard
+  ==
++$  last-heard  (unit time)
+::
 +$  confirmations  (unit @ud)
 ::
 +$  next-block-hash  (unit block-hash)
@@ -63,6 +97,12 @@
         =txid
         =wtxid
         =^transaction
+    ==
+  ::
+  +$  peers
+    $%  [%all peers=(map earth-address earth-peer-info)]
+        [%put address=earth-address info=earth-peer-info]
+        [%del address=earth-address]
     ==
   ::
   --
