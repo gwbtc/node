@@ -14,19 +14,6 @@
       port=@ud
   ==
 +$  blacklist  (map earth-address time)
-+$  earth-peers
-  %+  map
-      earth-address
-      earth-peer-state
-+$  earth-peer-state
-  $:  handshake-done=_|
-      wtxidrelay=_|
-      starting-height=block-height
-      =services:b-net
-      =last-heard
-      outbound-ping=(unit [=time nonce=@ux])
-      buffer=hexb
-  ==
 ::
 +$  earth-peer-info
   $:  handshake-done=_|

@@ -19,6 +19,7 @@ const explorerState = {
   headerWindow: null,
   pendingHeaderHeights: new Set(),
   peers: null,
+  pendingPeerDisconnects: new Set(),
   blocks: new Map(),
   pendingBlocks: new Set(),
   selectedBlock: null,
@@ -130,11 +131,18 @@ function handlePeers(peersUpdate) {
     for (const peer of peersUpdate.peers ?? []) {
       cachePeer(peer.address, peer.info);
     }
+    for (const key of explorerState.pendingPeerDisconnects) {
+      if (!explorerState.peers.has(key)) {
+        explorerState.pendingPeerDisconnects.delete(key);
+      }
+    }
     if (explorerState.peers.size === 0) explorerState.peers = null;
   } else if (peersUpdate.type === 'put') {
     cachePeer(peersUpdate.address, peersUpdate.info);
   } else if (peersUpdate.type === 'del' && peersUpdate.address) {
-    explorerState.peers?.delete(peerKey(peersUpdate.address));
+    const key = peerKey(peersUpdate.address);
+    explorerState.pendingPeerDisconnects.delete(key);
+    explorerState.peers?.delete(key);
     if (explorerState.peers?.size === 0) explorerState.peers = null;
   } else {
     return;
@@ -523,8 +531,6 @@ function normalizeBlockHeader(blockInfo, blockHeader) {
   return {
     height: Number(blockInfo['block-height']),
     hash: blockInfo['block-hash'],
-    confirmations: blockInfo.confirmations,
-    nextBlockHash: blockInfo['next-block-hash'],
     chainwork: blockInfo.chainwork,
     version: blockHeader.version,
     previousBlockHash: blockHeader['previous-block-hash'],
@@ -749,7 +755,10 @@ function formatNetworkName(network) {
 }
 
 function hasNetworkConnection(state) {
-  return state.network !== null && state.peers !== null;
+  if (state.network === null || state.peers === null) return false;
+  return Array.from(state.peers.values()).some(
+    (peer) => peer.info['handshake-done'] === true
+  );
 }
 
 function sendActions(actArray) {
@@ -792,6 +801,37 @@ function makePoke(mark, jsonData) {
     mark: mark,
     json: jsonData
   };
+}
+
+function earthAddressJson(address) {
+  return {
+    'network-id': address['network-id'],
+    address: address.address,
+    port: Number(address.port)
+  };
+}
+
+async function disconnectPeer(peer) {
+  if (explorerState.pendingPeerDisconnects.has(peer.key)) return;
+
+  explorerState.pendingPeerDisconnects.add(peer.key);
+  renderExplorer();
+
+  try {
+    const response = await sendActions([
+      makePoke(
+        'bitcoin-client-disconnect-peer',
+        earthAddressJson(peer.address)
+      )
+    ]);
+    if (!response.ok) {
+      throw new Error(`Disconnect poke failed with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error(error);
+    explorerState.pendingPeerDisconnects.delete(peer.key);
+    renderExplorer();
+  }
 }
 
 function makeAck(eventId) {
@@ -1038,6 +1078,12 @@ function BlockHeaderCard(header, selectedBlock) {
 }
 
 function BlockHeaderPanel(headers, selectedBlock) {
+  const networkConnected = hasNetworkConnection(explorerState);
+  const syncStatus = !networkConnected
+    ? 'unsynced'
+    : explorerState.isSynced ? 'synced' : 'syncing';
+  const syncStatusLabel = syncStatus.charAt(0).toUpperCase() +
+    syncStatus.slice(1);
   const searchInput = element('input', {
     key: 'block-search-input',
     className: 'block-search',
@@ -1174,7 +1220,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
         element('span', {
           key: 'status-module:network',
           className: `status-module__item status-module__item--network-${
-            hasNetworkConnection(explorerState) ? 'connected' : 'disconnected'
+            networkConnected ? 'connected' : 'disconnected'
           }`,
           text: explorerState.network
             ? `Bitcoin ${formatNetworkName(explorerState.network)}`
@@ -1182,10 +1228,8 @@ function BlockHeaderPanel(headers, selectedBlock) {
         }),
         element('span', {
           key: 'status-module:sync',
-          className: `status-module__item status-module__item--${
-            explorerState.isSynced ? 'synced' : 'syncing'
-          }`,
-          text: explorerState.isSynced ? 'Synced' : 'Syncing'
+          className: `status-module__item status-module__item--${syncStatus}`,
+          text: syncStatusLabel
         })
       ])
     ]),
@@ -1211,8 +1255,11 @@ function BlockDetailField(label, value, key) {
   ]);
 }
 
-function BlockHeaderData(block) {
+function BlockHeaderData(block, bestBlock) {
   const blockKey = `block:${block.hash}`;
+  const confirmations = bestBlock && block.height <= bestBlock.height
+    ? bestBlock.height - block.height + 1
+    : null;
 
   return element('div', {
     key: `${blockKey}:details`,
@@ -1226,7 +1273,7 @@ function BlockHeaderData(block) {
       element('dl', { className: 'block-detail-list' }, [
         BlockDetailField(
           'Confirmations',
-          String(block.confirmations ?? 'Unavailable'),
+          confirmations === null ? 'Unavailable' : String(confirmations),
           `${blockKey}:confirmations`
         ),
         BlockDetailField(
@@ -1638,6 +1685,32 @@ function PeerCard(peer) {
     ...(info.wtxidrelay ? ['WTXID relay'] : [])
   ];
   const peerRenderKey = `peer:${key}`;
+  const isDisconnecting = explorerState.pendingPeerDisconnects.has(key);
+  const disconnectButton = element('button', {
+    key: `${peerRenderKey}:disconnect`,
+    className: 'peer-card__disconnect',
+    attributes: {
+      type: 'button',
+      title: `Disconnect ${peerEndpoint(address)}`,
+      'aria-label': `Disconnect ${peerEndpoint(address)}`,
+      ...(isDisconnecting ? {
+        disabled: '',
+        'aria-busy': 'true'
+      } : {})
+    }
+  }, [
+    isDisconnecting
+      ? element('span', {
+          key: `${peerRenderKey}:disconnect:spinner`,
+          className: 'peer-card__disconnect-spinner',
+          attributes: { 'aria-hidden': 'true' }
+        })
+      : element('span', {
+          key: `${peerRenderKey}:disconnect:label`,
+          text: 'Disconnect'
+        })
+  ]);
+  listen(disconnectButton, 'click', () => disconnectPeer(peer));
 
   return element('article', {
     key: peerRenderKey,
@@ -1668,7 +1741,8 @@ function PeerCard(peer) {
         key: `${peerRenderKey}:network-id`,
         className: 'peer-card__network-id',
         text: String(address['network-id'] ?? 'unknown').toUpperCase()
-      })
+      }),
+      disconnectButton
     ]),
     element('dl', {
       key: `${peerRenderKey}:metadata`,
@@ -1760,14 +1834,14 @@ function PeersPanel(peers) {
   ]);
 }
 
-function BlockDataPanel(block, blockData, transactionPage) {
+function BlockDataPanel(block, blockData, transactionPage, bestBlock) {
   const blockKey = block ? `block:${block.hash}` : 'block:none';
   const content = block
     ? element('div', {
         key: `${blockKey}:content`,
         className: 'block-data-content'
       }, [
-        BlockHeaderData(block),
+        BlockHeaderData(block, bestBlock),
         blockData
           ? TransactionList(
               blockData.transactions,
@@ -1872,7 +1946,12 @@ function ExplorerApp(state) {
       className: 'explorer__lower-region'
     }, [
       PeersPanel(state.peers),
-      BlockDataPanel(state.selectedBlock, blockData, state.transactionPage)
+      BlockDataPanel(
+        state.selectedBlock,
+        blockData,
+        state.transactionPage,
+        state.bestBlock
+      )
     ])
   ]);
 }

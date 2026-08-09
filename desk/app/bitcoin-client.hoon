@@ -19,6 +19,20 @@
       tx-broadcast-cache-expiration=@dr
   ==
 ::
++$  earth-peers
+  %+  map
+      earth-address
+      earth-peer-state
++$  earth-peer-state
+  $:  handshake-done=_|
+      wtxidrelay=_|
+      starting-height=block-height
+      =services:b-net
+      =last-heard
+      outbound-ping=(unit [=time nonce=@ux])
+      buffer=hexb
+  ==
+::
 +$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
 +$  pending-block-height-reqs  (jug block-height pending-block-height-req)
 +$  pending-block-hash-req
@@ -127,7 +141,7 @@
     %-  broadcast-tx-inv
         txn
   ::
-      %add-earth-peer
+      %bitcoin-client-connect-peer
     =/  erp  !<(earth-address vaz)
     ?.  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
       ~&  >>>  [%need-ipv4-or-ipv6 erp]
@@ -135,7 +149,7 @@
     =?  earth-addresses  !(~(has by earth-addresses) erp)
       %+  ~(put by earth-addresses)
           erp
-      :*  now.bowl
+      :*  ~^now.bowl
           *services:b-net
       ==
     ?:  (~(has by earth-peers) erp)
@@ -144,15 +158,9 @@
     %-  connect-to-peer
         erp
   ::
-      %kill-peer-connections
-    =/  pes  ~(tap by earth-peers)
-    |-
-    ?~  pes  cor
-    =.  cor  (emil (close:tcp p.i.pes))
-    %=  $
-        pes  t.pes
-        earth-peers  (~(del by earth-peers) p.i.pes)
-    ==
+      %bitcoin-client-disconnect-peer
+    =/  erp  !<(earth-address vaz)
+    %+  disconnect-peer  |  erp
   ::
   ==
 ::
@@ -599,7 +607,11 @@
       |-
       ?~  mes  cor
       :: ~&  -.i.mes
-      =.  cor  (handle-message [erp erd] i.mes)  :: TODO: virtualize in case of crash
+      =.  cor
+        =+  (mole |.((handle-message erp i.mes)))
+        ?~  -
+            cor
+            u
       %=  $
           mes  t.mes
       ==
@@ -1070,6 +1082,7 @@
   =/  erd  (~(get by earth-peers) erp)
   ?~  erd  cor
   =.  earth-peers  (~(del by earth-peers) erp)
+  =.  cor  (emil (close:tcp erp))
   =.  cor
     ?-  ban
     ::
@@ -1209,7 +1222,7 @@
       =/  old  (~(get by earth-addresses) erp)
       %+  ~(put by earth-addresses)
           erp
-      ?~  old  [tim services.adr]
+      ?~  old  [~^tim services.adr]
       =?  last-heard.u.old
           |(?=(~ last-heard.u.old) (gth tim u.last-heard.u.old))
           ~^tim
@@ -1229,8 +1242,9 @@
   ==
 ::
 ++  handle-message
-  |=  [[erp=earth-address erd=earth-peer-state] msg=message:b-net]
+  |=  [erp=earth-address msg=message:b-net]
   ^+  cor
+  =/  erd  (~(got by earth-peers) erp)
   ?+  -.msg  cor  :: TODO: add a case for all messages where the handshake is checked at a minimum
   ::
       %version

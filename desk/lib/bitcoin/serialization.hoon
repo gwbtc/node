@@ -747,7 +747,12 @@
     =*  nek  network.hed
     =*  siz  payload-size.hed
     =*  typ  command.hed
-    ?+  typ  ~^+:(de-read:de-core siz)  :: TODO: virtualize the payload deserialization and produce null + consume payload bytes on crash
+    =-  ?^  -  u
+        :-  ~
+            +:(de-read:de-core siz)
+    %-  mole
+    |.
+    ?+  typ  !!
     ::
         %version
       =^  version   de-core  (de-read 4)
