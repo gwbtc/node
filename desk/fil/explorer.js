@@ -1676,10 +1676,43 @@ function activePeerServices(services = {}) {
     .map(([, label]) => label);
 }
 
+function formatPeerTimestamp(timestamp) {
+  if (timestamp === null || timestamp === undefined) return 'Unavailable';
+  return formatBlockTime(Number(timestamp));
+}
+
+function formatPingAverage(milliseconds) {
+  if (milliseconds === null || milliseconds === undefined) {
+    return 'Unavailable';
+  }
+
+  const value = Number(milliseconds);
+  return Number.isFinite(value) ? `${value.toLocaleString()} ms` : 'Unavailable';
+}
+
+function PeerDetailField(peerRenderKey, field, label, value) {
+  const fieldKey = `${peerRenderKey}:${field}`;
+  return element('div', {
+    key: fieldKey,
+    className: 'peer-card__field'
+  }, [
+    element('dt', {
+      key: `${fieldKey}:label`,
+      text: label
+    }),
+    element('dd', {
+      key: `${fieldKey}:value`,
+      text: value
+    })
+  ]);
+}
+
 function PeerCard(peer) {
   const { key, address, info } = peer;
   const isActive = info['handshake-done'] === true;
   const lastHeard = info['last-heard'];
+  const connectionOpened = info['connection-opened'];
+  const pingAverage = info['ping-average'];
   const services = [
     ...activePeerServices(info.services),
     ...(info.wtxidrelay ? ['WTXID relay'] : [])
@@ -1748,21 +1781,24 @@ function PeerCard(peer) {
       key: `${peerRenderKey}:metadata`,
       className: 'peer-card__metadata'
     }, [
-      element('div', {
-        key: `${peerRenderKey}:last-heard`,
-        className: 'peer-card__field'
-      }, [
-        element('dt', {
-          key: `${peerRenderKey}:last-heard:label`,
-          text: 'Last heard'
-        }),
-        element('dd', {
-          key: `${peerRenderKey}:last-heard:value`,
-          text: lastHeard === null
-            ? 'Unavailable'
-            : formatBlockTime(Number(lastHeard))
-        })
-      ])
+      PeerDetailField(
+        peerRenderKey,
+        'connection-opened',
+        'Connected',
+        formatPeerTimestamp(connectionOpened)
+      ),
+      PeerDetailField(
+        peerRenderKey,
+        'last-heard',
+        'Last heard',
+        formatPeerTimestamp(lastHeard)
+      ),
+      PeerDetailField(
+        peerRenderKey,
+        'ping-average',
+        'Ping average',
+        formatPingAverage(pingAverage)
+      )
     ]),
     element('div', {
       key: `${peerRenderKey}:services`,

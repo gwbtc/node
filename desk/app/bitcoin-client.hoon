@@ -8,8 +8,11 @@
 +$  net-params
   $:  target-addresses=@ud
       target-peers=@ud
+      target-priority-peers=@ud
       minimum-peer-protocol-version=@ud
       required-peer-services=services:b-net
+      priority-peer-base-ping-average=@dr
+      peer-handshake-timeout=@dr
       blacklist-expiration=@dr
       blacklist-interval=@dr
       ping-interval=@dr
@@ -19,19 +22,19 @@
       tx-broadcast-cache-expiration=@dr
   ==
 ::
-+$  earth-peers
-  %+  map
-      earth-address
-      earth-peer-state
++$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
   $:  handshake-done=_|
       wtxidrelay=_|
       starting-height=block-height
       =services:b-net
+      connection-opened=time
       =last-heard
-      outbound-ping=(unit [=time nonce=@ux])
+      =ping-average
+      =outbound-ping
       buffer=hexb
   ==
++$  outbound-ping  (unit [=time nonce=@ux])
 ::
 +$  pending-block-hash-reqs    (jug block-hash pending-block-hash-req)
 +$  pending-block-height-reqs  (jug block-height pending-block-height-req)
@@ -126,6 +129,7 @@
     ~&   >   [%blacklist ~(wyt in blacklist)]
     ~&   >   [%total-earth-peers ~(wyt in earth-peers)]
     ~&   >   [%live-earth-peers (lent (skim ~(tap by earth-peers) |=([k=earth-address v=earth-peer-state] handshake-done.v)))]
+    ~&  >>   [%priority-peers get-priority-peer-count]
     cor
   ::
       %broadcast-transaction
@@ -147,10 +151,10 @@
       ~&  >>>  [%need-ipv4-or-ipv6 erp]
       !!
     =?  earth-addresses  !(~(has by earth-addresses) erp)
-      %+  ~(put by earth-addresses)
-          erp
-      :*  ~^now.bowl
-          *services:b-net
+      %+  ~(put by earth-addresses)  erp
+      %*  p
+          p=*earth-address-info
+          address-provenance  [%userspace ~]
       ==
     ?:  (~(has by earth-peers) erp)
       ~&  >>  [%already-connected erp]
@@ -318,7 +322,7 @@
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -345,7 +349,7 @@
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
       =.  cor  (emit (set-pending-block-height-req-timer het req))
-      =/  som  get-some-peer
+      =/  som  (get-some-peer |)
       ?~  som  cor
       %-  emit
       %+  send:tcp  u.som
@@ -374,7 +378,7 @@
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -392,7 +396,7 @@
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
       =.  cor  (emit (set-pending-block-height-req-timer het req))
-      =/  som  get-some-peer
+      =/  som  (get-some-peer |)
       ?~  som  cor
       %-  emit
       %+  send:tcp  u.som
@@ -422,7 +426,7 @@
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -457,24 +461,26 @@
   ^+  cor
   ?+  wir  cor
   ::
-      [%timer %earth-peer earth-peer=*]
+      [%timer %peer-handshake-timeout earth-peer=*]
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    =/  erd  (~(get by earth-peers) erp)
+    ?~  erd  cor
+    ?.  ?=([%behn %wake *] sin)  cor
+    ?:  handshake-done.u.erd  cor
+    %+  disconnect-peer  &
+        erp
+  ::
+      [%timer %peer-ping earth-peer=*]
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(get by earth-peers) erp)
     ?~  erd  cor
     ?.  ?=([%behn %wake *] sin)  cor
     :: if the previous ping hasn't been answered, disconnect and ban
     ?:  .?(outbound-ping.u.erd)
-      %+  disconnect-peer  &  erp  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
-    =/  nun  (~(rad og eny.bowl) (lsh [3 8] 1))
-    =.  outbound-ping.u.erd  [~ now.bowl nun]
-    =.  cor  (update-peer erp u.erd)
-    %-  emil
-    :-  (set-ping-timer erp)
-    :_  ~
-    %+  send:tcp  erp
-    %-  ~(write ne:b-ser network)
-    :~  [%ping nun]
-    ==
+      %+  disconnect-peer  &  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
+          erp
+    %-  send-ping
+        erp
   ::
       [%timer %tx-inv-broadcast-queue ~]
     ?.  have-live-peers
@@ -502,7 +508,7 @@
     :: TODO: make less janky
     ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter])  cor
     =.  cor  (emit (set-pending-block-hash-req-timer haz [%block ~]))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -516,7 +522,7 @@
     =/  req  [%block-filter ~]
     ?.  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  cor  (emit (set-pending-block-hash-req-timer haz req))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -530,7 +536,7 @@
     :: TODO: make less janky
     ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter])  cor
     =.  cor  (emit (set-pending-block-height-req-timer het [%block ~]))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -545,7 +551,7 @@
     =/  req  [%block-filter ~]
     ?.  (~(has ju pending-block-height-reqs) het req)  cor
     =.  cor  (emit (set-pending-block-height-req-timer het req))
-    =/  som  get-some-peer
+    =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
     %+  send:tcp  u.som
@@ -619,7 +625,7 @@
         %connected
       ~&  >  [%tcp-connected erp]
       %-  emil
-      :_  (set-ping-timer erp)^~
+      :_  (set-peer-handshake-timeout-timer erp)^~
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
       :~  make-version-message
@@ -741,7 +747,9 @@
   :*  handshake-done.erd
       wtxidrelay.erd
       services.erd
+      connection-opened.erd
       last-heard.erd
+      ping-average.erd
   ==
 ::
 ++  make-update
@@ -869,13 +877,21 @@
     ==
   --
 ::
+++  set-peer-handshake-timeout-timer
+  |=  erp=earth-address
+  ^-  card
+  %.  peer-handshake-timeout:net-params
+  %~  set
+      timer
+  %+  weld  /timer/peer-handshake-timeout  (en-earth-peer-path erp)
+::
 ++  set-ping-timer
   |=  erp=earth-address
   ^-  card
   %.  ping-interval:net-params
   %~  set
       timer
-  %+  weld  /timer/earth-peer  (en-earth-peer-path erp)
+  %+  weld  /timer/peer-ping  (en-earth-peer-path erp)
 ::
 ++  set-blacklist-timer
   ^-  card
@@ -992,30 +1008,98 @@
       ?:(node-p2p-v2.req node-p2p-v2.ser &)
   ==
 ::
+++  is-priority-peer
+  |=  pig=ping-average
+  ^-  ?
+  ?~  pig  |
+  %+  lte
+      u.pig
+      get-current-priority-peer-ping-threshold
+::
+++  get-current-priority-peer-ping-threshold
+  ^-  @dr
+  =/  pis
+    %+  murn  ~(tap by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+        ping-average.erd
+  =/  med
+    ?.  .?(pis)  *@dr
+    %+  snag
+        (div (lent pis) 2)
+        pis
+  %+  max
+      (div med 2)
+      priority-peer-base-ping-average:net-params
+::
+++  get-priority-peer-count
+  ^-  @ud
+  %-  ~(rep by earth-peers)
+  |=  [[erp=earth-address erd=earth-peer-state] num=@ud]
+  ?.  (is-priority-peer ping-average.erd)  num
+  .+  num
+::
+++  get-priority-peer-addresses
+  ^-  (set earth-address)
+  %-  ~(rep by earth-addresses)
+  |=  [[erp=earth-address erd=earth-address-info] ads=(set earth-address)]
+  ?.  (is-priority-peer ping-average.erd)  ads
+  %-  ~(put in ads)
+      erp
+::
 ++  get-n-new-addresses
   |=  num=@ud
   ^-  (list earth-address)
+  =/  priority-peer-count  get-priority-peer-count
+  =/  num-priority-peers-needed
+    ?:  (gte priority-peer-count target-priority-peers.net-params)  0
+    %+  sub
+        target-priority-peers.net-params
+        priority-peer-count
   =/  ads  (~(dif in ~(key by earth-addresses)) ~(key by earth-peers))
-  =/  siz  ~(wyt in ads)
   =/  rng  ~(. og eny.bowl)
+  =/  priority-ads  (~(int in ads) get-priority-peer-addresses)
+  =/  priority-siz  ~(wyt in priority-ads)
+  =/  regular-ads   (~(dif in ads) priority-ads)
+  =/  regular-siz   ~(wyt in regular-ads)
   |-
-  ?:  =(0 siz)  ~
   ?:  =(0 num)  ~
-  =^  ind  rng  (rads:rng siz)
-  =/  adr  (snag ind ~(tap in ads))
+  ?:  ?|  =(0 num-priority-peers-needed)
+          =(0 priority-siz)
+      ==
+    ?:  =(0 regular-siz)  ~
+    =^  ind  rng  (rads:rng regular-siz)
+    =/  adr  (snag ind ~(tap in regular-ads))
+    :-  adr
+    %=  $
+        num          (dec num)
+        regular-siz  (dec regular-siz)
+        regular-ads  (~(del in regular-ads) adr)
+    ==
+  =^  ind  rng  (rads:rng priority-siz)
+  =/  adr  (snag ind ~(tap in priority-ads))
   :-  adr
   %=  $
-      num  (dec num)
-      siz  (dec siz)
-      ads  (~(del in ads) adr)
+      num           (dec num)
+      priority-siz  (dec priority-siz)
+      priority-ads  (~(del in priority-ads) adr)
   ==
 ::
 ++  get-some-peer
+  |=  get-priority=?
   ^-  (unit earth-address)
   =/  pes
     %+  skim  ~(tap by earth-peers)
     |=  [erp=earth-address erd=earth-peer-state]
         handshake-done.erd
+  =?  pes  get-priority
+    =;  pri
+      ?~  pri
+          pes
+          pri
+    %+  skim  pes
+    |=  [erp=earth-address erd=earth-peer-state]
+    %-  is-priority-peer
+        ping-average.erd
   =/  siz  (lent pes)
   ?:  =(0 siz)  ~
   =/  ind  (~(rad og eny.bowl) siz)
@@ -1031,7 +1115,15 @@
   ~&  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
-  =/  erd  *earth-peer-state
+  =/  ard  (~(got by earth-addresses) erp)
+  =/  erd
+    %*  p
+        p=*earth-peer-state
+        connection-opened  now.bowl
+        last-heard         last-heard.ard
+        services           services.ard
+        ping-average       ping-average.ard
+    ==
   =.  earth-peers  (~(put by earth-peers) erp erd)
   =.  cor
     %-  emit
@@ -1066,6 +1158,7 @@
           =(wtxidrelay.erd wtxidrelay.old)
           =(services.erd services.old)
           =(last-heard.erd last-heard.old)
+          =(ping-average.erd ping-average.old)
       ==
     cor
   %-  emit
@@ -1093,9 +1186,15 @@
       ==
     ::
         %.n
-      =/  dat  [last-heard.u.erd services.u.erd]
       %_  cor
-          earth-addresses  (~(put by earth-addresses) erp dat)
+          earth-addresses
+            %+  ~(jab by earth-addresses)  erp
+            |=  adr=earth-address-info
+            %_  adr
+                services      services.u.erd
+                last-heard    last-heard.u.erd
+                ping-average  ping-average.u.erd
+            ==
       ==
     ::
     ==
@@ -1137,9 +1236,37 @@
   ^-  message:b-net
   [%getcfilters 0 start stop]
 ::
+++  update-ping-average
+  |=  [avg=ping-average new=@dr]
+  ^-  ping-average
+  ~&  >  ['ping time' new]
+  :-  ~
+  =/  old
+    %+  fall
+        avg
+    .+  get-current-priority-peer-ping-threshold
+  %+  div
+      (add old new)
+      2
+::
+++  send-ping
+  |=  erp=earth-address
+  ^+  cor
+  =/  erd  (~(got by earth-peers) erp)
+  =/  nun  (~(rad og eny.bowl) (lsh [3 8] 1))
+  =.  outbound-ping.erd  [~ now.bowl nun]
+  =.  cor  (update-peer erp erd)
+  %-  emil
+  :-  (set-ping-timer erp)
+  :_  ~
+  %+  send:tcp  erp
+  %-  ~(write ne:b-ser network)
+  :~  [%ping nun]
+  ==
+::
 ++  continue-syncing-headers
   ^+  cor
-  =/  som  get-some-peer
+  =/  som  (get-some-peer &)
   ?~  som  cor
   ?:  block-headers-are-synced
     =.  header-sync-req
@@ -1206,34 +1333,45 @@
   ==
 ::
 ++  handle-addrv2
-  |=  ads=(list address-v2:b-net)
+  |=  [erp=earth-address ads=(list address-v2:b-net)]
   ^+  cor
   =.  cor
     |-
     ?~  ads  cor
     =*  adr  i.ads
-    =/  erp  [id.adr address.adr port.adr]
+    =/  new  [id.adr address.adr port.adr]
     =?  earth-addresses
         ?&  (peer-services-are-sufficient services.adr)
             |(?=(%ipv4 id.adr) ?=(%ipv6 id.adr))
-            !(~(has by blacklist) erp)
+            !(~(has by blacklist) new)
         ==
       =/  tim  (de-earth-time time.adr)
-      =/  old  (~(get by earth-addresses) erp)
-      %+  ~(put by earth-addresses)
-          erp
-      ?~  old  [~^tim services.adr]
-      =?  last-heard.u.old
-          |(?=(~ last-heard.u.old) (gth tim u.last-heard.u.old))
-          ~^tim
-      u.old
+      =/  pre  (~(get by earth-addresses) new)
+      %+  ~(put by earth-addresses)  new
+      ?~  pre
+        %*  p
+            p=*earth-address-info
+            address-provenance  [%network erp]
+            last-heard          [~ tim]
+            services            services.adr
+        ==
+      ?.  ?&  ?=(%network -.address-provenance.u.pre)
+              ?=(~ ping-average.u.pre)
+              |(?=(~ last-heard.u.pre) (gth tim u.last-heard.u.pre))
+          ==
+        u.pre
+      %_  u.pre
+          address-provenance  [%network erp]
+          last-heard          [~ tim]
+          services            services.adr
+      ==
     %=  $
         ads  t.ads
     ==
   =.  cor  connect-to-more-peers
   =/  num-addrs  ~(wyt in earth-addresses)
   ?:  (gte num-addrs target-addresses.net-params)  cor
-  =/  som  get-some-peer
+  =/  som  (get-some-peer |)
   ?~  som  cor
   %-  emit
   %+  send:tcp  u.som
@@ -1284,14 +1422,17 @@
           erp
     =.  handshake-done.erd  &
     =.  cor  (update-peer erp erd)
-    %-  emit
-    %+  send:tcp  erp
-    %-  ~(write ne:b-ser network)
-    :+  [%verack ~]
-        [%getheaders make-block-locator ~]
-    ?:  (gte ~(wyt in earth-addresses) target-addresses.net-params)  ~
-    :~  [%getaddr ~]
-    ==
+    =.  cor
+      %-  emit
+      %+  send:tcp  erp
+      %-  ~(write ne:b-ser network)
+      :+  [%verack ~]
+          [%getheaders make-block-locator ~]
+      ?:  (gte ~(wyt in earth-addresses) target-addresses.net-params)  ~
+      :~  [%getaddr ~]
+      ==
+    %-  send-ping
+        erp
   ::
       %ping
     ?.  handshake-done.erd  (disconnect-peer & erp)
@@ -1305,13 +1446,23 @@
     ?.  handshake-done.erd  (disconnect-peer & erp)
     ?~  outbound-ping.erd  cor
     ?.  =(nonce.msg nonce.u.outbound-ping.erd)  cor
-    %+  update-peer  erp  erd(outbound-ping ~)
+    =.  ping-average.erd
+      %+  update-ping-average
+          ping-average.erd
+      %+  sub
+          now.bowl
+          time.u.outbound-ping.erd
+    %+  update-peer
+        erp
+    %=  erd
+        outbound-ping  ~
+    ==
   ::
       %addr
     ~&  >>  [%addr (lent addresses.msg)]
     ?.  handshake-done.erd  (disconnect-peer & erp)
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
-    %-  handle-addrv2
+    %+  handle-addrv2  erp
     %+  turn  addresses.msg
     |=  adr=address-v1:b-net
     ^-  address-v2:b-net
@@ -1326,7 +1477,8 @@
     ~&  >>  [%addrv2 (lent addresses.msg)]
     ?.  handshake-done.erd  (disconnect-peer & erp)
     ?:  =(~ addresses.msg)  (disconnect-peer & erp)
-    %-  handle-addrv2
+    %+  handle-addrv2
+        erp
         addresses.msg
   ::
       %inv
@@ -1598,7 +1750,7 @@
         ?+  -.i.height-reqs  cor
         ::
             %block-filter
-          =/  som  get-some-peer
+          =/  som  (get-some-peer |)
           ?~  som  cor
           =/  req  [%block-filter ~]
           =.  cor  (emit (set-pending-block-height-req-timer het req))
@@ -1713,7 +1865,7 @@
                 ==
               ::
                   %block
-                =/  som  get-some-peer
+                =/  som  (get-some-peer |)
                 ?~  som  cor
                 =/  req  [%block ~]
                 =.  cor  (emit (set-pending-block-height-req-timer het req))
@@ -1963,11 +2115,14 @@
   =.  net-params
     %_  net-params
         target-addresses                             500
-        target-peers                                 1
+        target-peers                                 10
+        target-priority-peers                        4
         minimum-peer-protocol-version                70.016
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
+        priority-peer-base-ping-average              (div ~s1 2)  :: TODO: find best value
+        peer-handshake-timeout                       ~s7
         blacklist-expiration                         ~d3
         blacklist-interval                           ~d1
         ping-interval                                ~m2

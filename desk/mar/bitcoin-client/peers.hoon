@@ -79,6 +79,11 @@
       (sub tim ~1970.1.1)
       ~s1
 ::
+++  en-earth-duration-milliseconds
+  |=  dur=@dr
+  ^-  @ud
+  (div dur (div ~s1 1.000))
+::
 ++  earth-address-json
   |=  adr=earth-address
   ^-  ^json
@@ -105,12 +110,17 @@
   ^-  ^json
   =/  lat
     ?~  last-heard.inf  ~
-    [%n (crip ((d-co:co 1) (en-earth-time u.last-heard.inf)))]
+    (decimal (en-earth-time u.last-heard.inf))
+  =/  pig
+    ?~  ping-average.inf  ~
+    (decimal (en-earth-duration-milliseconds u.ping-average.inf))
   %-  object
   :~  ['handshake-done' [%b handshake-done.inf]]
       ['wtxidrelay' [%b wtxidrelay.inf]]
       ['services' (services-json services.inf)]
+      ['connection-opened' (decimal (en-earth-time connection-opened.inf))]
       ['last-heard' lat]
+      ['ping-average' pig]
   ==
 ::
 ++  peer-json

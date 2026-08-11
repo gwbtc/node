@@ -5,23 +5,33 @@
 +$  earth-addresses
   %+  map
       earth-address
-  $:  =last-heard
-      =services:b-net
-  ==
+      earth-address-info
 +$  earth-address
   $:  net-id=network-address-id:b-net
       address=@ux
       port=@ud
   ==
-+$  blacklist  (map earth-address time)
-::
++$  earth-address-info
+  $:  =address-provenance
+      =last-heard
+      =services:b-net
+      =ping-average
+  ==
 +$  earth-peer-info
   $:  handshake-done=_|
       wtxidrelay=_|
       =services:b-net
+      connection-opened=time
       =last-heard
+      =ping-average
   ==
-+$  last-heard  (unit time)
++$  address-provenance
+  $%  [%userspace ~]
+      [%network who=earth-address]
+  ==
++$  blacklist     (map earth-address time)
++$  last-heard    (unit time)
++$  ping-average  (unit @dr)
 ::
 +$  confirmations  (unit @ud)
 ::
