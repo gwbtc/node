@@ -1890,8 +1890,7 @@
       :: - update affected subscriptions
       ::
       =/  new-best-block  `^best-block`[haz het wok]
-      =/  new-best-branch
-        ^-  ^bh-index
+      =/  [last-common-block=[=block-height =block-hash] new-best-branch=^bh-index]
         =/  new-set
           %-  ~(gas in *(set [block-height block-hash]))
           :~  [block-height.new-best-block block-hash.new-best-block]
@@ -1907,10 +1906,12 @@
         |-
         =/  int  (~(int in old-set) new-set)
         ?^  int
+          =*  last-common  n.int
           =/  new-branch  (gas:on-bh-index *^bh-index ~(tap in new-set))
+          :-  last-common
           %^  lot:on-bh-index
               new-branch
-              [~ -.n.int]
+              [~ -.last-common]
               ~
         =/  new-head  (~(got by block-headers) new-hash)
         =/  old-head  (~(got by block-headers) old-hash)
@@ -1920,17 +1921,17 @@
             new-hash  previous-block-hash.block-header.new-head
             old-hash  previous-block-hash.block-header.old-head
         ==
+      =/  stale-branch
+        %^  lot:on-bh-index  bh-index
+            [~ block-height.last-common-block]
+            ~
       =.  bh-index
-        %^  lot:on-bh-index  bh-index  ~
+        %^  lot:on-bh-index  bh-index
+            ~
         :-  ~
         =<  key.head
         %-  pop:on-bh-index
-            new-best-branch
-      =/  last-common-block
-        ^-  [=block-height =block-hash]
-        %-  need
-        %-  ram:on-bh-index
-            bh-index
+            stale-branch
       =.  bh-index
         %+  uni:on-bh-index
             bh-index
@@ -1951,8 +1952,11 @@
       =.  cor
         %-  emit
         %-  ~(best-block make-update ~)
-        :-  %reorg-rollback
+        :+  %reorg-rollback
             last-common-block
+        %-  flop
+        %-  tap:on-bh-index
+            stale-branch
       =.  cor
         %-  emil
         %-  ~(rep by pending-block-hash-reqs)

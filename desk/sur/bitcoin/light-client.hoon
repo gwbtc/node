@@ -52,8 +52,10 @@
   ::
   +$  best-block
     $%  [%new =block-height =block-hash]
-        [%reorg-rollback =block-height =block-hash]
-    ==
+    $:  %reorg-rollback
+        last-common=[=block-height =block-hash]
+        stale-branch=(list [=block-height =block-hash])
+    ==  ==
   ::
   +$  block-header-by-hash
     $@  ~
