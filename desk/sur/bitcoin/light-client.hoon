@@ -13,9 +13,9 @@
   ==
 +$  earth-address-info
   $:  =address-provenance
+      =address-rank
       =last-heard
       =services:b-net
-      =ping-average
   ==
 +$  earth-peer-info
   $:  handshake-done=_|
@@ -24,6 +24,12 @@
       connection-opened=time
       =last-heard
       =ping-average
+  ==
++$  address-rank
+  $~  %unknown
+  $?  %priority
+      %known
+      %unknown
   ==
 +$  address-provenance
   $%  [%userspace ~]

@@ -1018,6 +1018,7 @@
 ::
 ++  get-current-priority-peer-ping-threshold
   ^-  @dr
+  =/  percent-of-median  80
   =/  pis
     %+  murn  ~(tap by earth-peers)
     |=  [erp=earth-address erd=earth-peer-state]
@@ -1026,9 +1027,11 @@
     ?.  .?(pis)  *@dr
     %+  snag
         (div (lent pis) 2)
+    %+  sort
         pis
+        gth
   %+  max
-      (div med 2)
+      (div (mul med percent-of-median) 100)
       priority-peer-base-ping-average:net-params
 ::
 ++  get-priority-peer-count
@@ -1041,8 +1044,8 @@
 ++  get-priority-peer-addresses
   ^-  (set earth-address)
   %-  ~(rep by earth-addresses)
-  |=  [[erp=earth-address erd=earth-address-info] ads=(set earth-address)]
-  ?.  (is-priority-peer ping-average.erd)  ads
+  |=  [[erp=earth-address ard=earth-address-info] ads=(set earth-address)]
+  ?.  ?=(%priority address-rank.ard)  ads
   %-  ~(put in ads)
       erp
 ::
@@ -1122,7 +1125,6 @@
         connection-opened  now.bowl
         last-heard         last-heard.ard
         services           services.ard
-        ping-average       ping-average.ard
     ==
   =.  earth-peers  (~(put by earth-peers) erp erd)
   =.  cor
@@ -1193,7 +1195,11 @@
             %_  adr
                 services      services.u.erd
                 last-heard    last-heard.u.erd
-                ping-average  ping-average.u.erd
+                address-rank
+                  ?-  (is-priority-peer ping-average.u.erd)
+                      %&  %priority
+                      %|  %known
+                  ==
             ==
       ==
     ::
@@ -1356,7 +1362,7 @@
             services            services.adr
         ==
       ?.  ?&  ?=(%network -.address-provenance.u.pre)
-              ?=(~ ping-average.u.pre)
+              ?=(%unknown address-rank.u.pre)
               |(?=(~ last-heard.u.pre) (gth tim u.last-heard.u.pre))
           ==
         u.pre
