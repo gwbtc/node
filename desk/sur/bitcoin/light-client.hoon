@@ -25,6 +25,15 @@
       =last-heard
       =ping-average
   ==
++$  earth-blacklist
+  %+  map
+      earth-address
+      earth-blacklist-info
++$  earth-blacklist-info
+  $:  when=time
+      reason=@t
+      expiration=(unit @dr)
+  ==
 +$  address-rank
   $~  %unknown
   $?  %priority
@@ -35,7 +44,6 @@
   $%  [%userspace ~]
       [%network who=earth-address]
   ==
-+$  blacklist     (map earth-address time)
 +$  last-heard    (unit time)
 +$  ping-average  (unit @dr)
 ::
@@ -107,6 +115,18 @@
   +$  peers
     $%  [%all peers=(map earth-address earth-peer-info)]
         [%put address=earth-address info=earth-peer-info]
+        [%del address=earth-address]
+    ==
+  ::
+  +$  addresses
+    $%  [%all addresses=earth-addresses]
+        [%put address=earth-address info=earth-address-info]
+        [%del address=earth-address]
+    ==
+  ::
+  +$  blacklist
+    $%  [%all blacklist=earth-blacklist]
+        [%put address=earth-address info=earth-blacklist-info]
         [%del address=earth-address]
     ==
   ::

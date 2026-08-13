@@ -13,7 +13,6 @@
       required-peer-services=services:b-net
       priority-peer-base-ping-average=@dr
       peer-handshake-timeout=@dr
-      blacklist-expiration=@dr
       blacklist-interval=@dr
       ping-interval=@dr
       pending-req-retry-interval=@dr
@@ -74,7 +73,7 @@
       =net-params
       =earth-peers
       =earth-addresses
-      =blacklist
+      =earth-blacklist
       =pending-block-hash-reqs
       =pending-block-height-reqs
       =header-sync-req
@@ -126,7 +125,7 @@
     ~&  >>>  [%tx-inv-broadcast-queue (lent tx-inv-broadcast-queue)]
     ~&  >>>  [%tx-broadcast-cache ~(wyt in tx-broadcast-cache)]
     ~&   >   [%earth-addresses ~(wyt in earth-addresses)]
-    ~&   >   [%blacklist ~(wyt in blacklist)]
+    ~&   >   [%earth-blacklist ~(wyt in earth-blacklist)]
     ~&   >   [%total-earth-peers ~(wyt in earth-peers)]
     ~&   >   [%live-earth-peers (lent (skim ~(tap by earth-peers) |=([k=earth-address v=earth-peer-state] handshake-done.v)))]
     ~&  >>   [%priority-peers get-priority-peer-count]
@@ -150,12 +149,21 @@
     ?.  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
       ~&  >>>  [%need-ipv4-or-ipv6 erp]
       !!
-    =?  earth-addresses  !(~(has by earth-addresses) erp)
-      %+  ~(put by earth-addresses)  erp
-      %*  p
-          p=*earth-address-info
-          address-provenance  [%userspace ~]
-      ==
+    =?  cor  !(~(has by earth-addresses) erp)
+      =/  ard
+        %*  p
+            p=*earth-address-info
+            address-provenance  [%userspace ~]
+        ==
+      =.  earth-addresses
+        %+  ~(put by earth-addresses)
+            erp
+            ard
+      %-  emit
+      %-  ~(addresses make-update ~)
+      :+  %put
+          erp
+          ard
     ?:  (~(has by earth-peers) erp)
       ~&  >>  [%already-connected erp]
       cor
@@ -164,7 +172,9 @@
   ::
       %bitcoin-client-disconnect-peer
     =/  erp  !<(earth-address vaz)
-    %+  disconnect-peer  |  erp
+    %+  disconnect-peer
+        ~
+        erp
   ::
   ==
 ::
@@ -443,6 +453,18 @@
     %-  make-earth-peer-info
         erd
   ::
+      [%addresses ~]
+    %-  emit
+    %-  ~(addresses make-update ~^src.bowl)
+    :-  %all
+        earth-addresses
+  ::
+      [%blacklist ~]
+    %-  emit
+    %-  ~(blacklist make-update ~^src.bowl)
+    :-  %all
+        earth-blacklist
+  ::
   ==
 ::
 ++  leave
@@ -467,7 +489,8 @@
     ?~  erd  cor
     ?.  ?=([%behn %wake *] sin)  cor
     ?:  handshake-done.u.erd  cor
-    %+  disconnect-peer  &
+    %+  disconnect-peer
+        ['handshake timeout' ~^~d1]
         erp
   ::
       [%timer %peer-ping earth-peer=*]
@@ -477,7 +500,8 @@
     ?.  ?=([%behn %wake *] sin)  cor
     :: if the previous ping hasn't been answered, disconnect and ban
     ?:  .?(outbound-ping.u.erd)
-      %+  disconnect-peer  &  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
+      %+  disconnect-peer
+          ['ping timeout' ~^~d3]
           erp
     %-  send-ping
         erp
@@ -576,13 +600,27 @@
         continue-syncing-headers
   ::
       [%timer %blacklist ~]
-    =.  blacklist
-      %-  ~(rep by blacklist)
-      |=  [[key=earth-address val=time] acc=^blacklist]
-      ?:  (gte (sub now.bowl val) blacklist-expiration.net-params)  acc
-      %+  ~(put by acc)  key  val
-    %-  emit
-        set-blacklist-timer
+    =^  caz  earth-blacklist
+      %-  ~(rep by earth-blacklist)
+      |=  $:  [key=earth-address val=earth-blacklist-info]
+              caz=(list card)
+              acc=^earth-blacklist
+          ==
+      ?:  ?&  ?=(^ expiration.val)
+              (gte (sub now.bowl when.val) u.expiration.val)
+          ==
+        :_  acc
+        :_  caz
+        %-  ~(blacklist make-update ~)
+        :-  %del
+            key
+      :-  caz
+      %+  ~(put by acc)
+          key
+          val
+    %-  emil
+    :-  set-blacklist-timer
+        caz
   ::
       [%explorer %file-update ~]
     ?.  ?=([%clay %writ *] sin)  cor
@@ -633,11 +671,15 @@
     ::
         %closed
       ~&  >>>  [%tcp-closed erp]
-      %+  disconnect-peer  |  erp
+      %+  disconnect-peer
+          ~
+          erp
     ::
         %error
       ~&  >>>  [%tcp-error erp msg.gif]
-      %+  disconnect-peer  &  erp
+      %+  disconnect-peer
+          [(cat 3 'tcp error: ' msg.gif) ~^~d3]
+          erp
     ::
     ==
   ::
@@ -856,6 +898,18 @@
     ^-  card
     =/  paf  /peers
     %+  fact  paf  [%bitcoin-client-peers !>(dat)]
+  ::
+  ++  addresses
+    |=  dat=addresses:update
+    ^-  card
+    =/  paf  /addresses
+    %+  fact  paf  [%bitcoin-client-addresses !>(dat)]
+  ::
+  ++  blacklist
+    |=  dat=blacklist:update
+    ^-  card
+    =/  paf  /blacklist
+    %+  fact  paf  [%bitcoin-client-blacklist !>(dat)]
   ::
   ++  fact  |=([paf=path cag=cage] `card`[%give %fact ?-(for ~ paf^~, ^ ~) cag])
   ++  kick  |=(paf=path `card`[%give %kick paf^~ for])
@@ -1171,7 +1225,7 @@
       erd
 ::
 ++  disconnect-peer
-  |=  [ban=? erp=earth-address]
+  |=  [ban=$@(~ [reason=@t expiration=(unit @dr)]) erp=earth-address]
   ^+  cor
   =/  was-synced  is-fully-synced
   =/  erd  (~(get by earth-peers) erp)
@@ -1179,31 +1233,21 @@
   =.  earth-peers  (~(del by earth-peers) erp)
   =.  cor  (emil (close:tcp erp))
   =.  cor
-    ?-  ban
-    ::
-        %.y
-      %_  cor
-          blacklist        (~(put by blacklist) erp now.bowl)
-          earth-addresses  (~(del by earth-addresses) erp)
+    ?^  ban  (blacklist-address erp ban)
+    =/  ard  (~(got by earth-addresses) erp)
+    =.  services.ard  services.u.erd
+    =.  last-heard.ard  last-heard.u.erd
+    =.  address-rank.ard
+      ?-  (is-priority-peer ping-average.u.erd)
+          %&  %priority
+          %|  %known
       ==
-    ::
-        %.n
-      %_  cor
-          earth-addresses
-            %+  ~(jab by earth-addresses)  erp
-            |=  adr=earth-address-info
-            %_  adr
-                services      services.u.erd
-                last-heard    last-heard.u.erd
-                address-rank
-                  ?-  (is-priority-peer ping-average.u.erd)
-                      %&  %priority
-                      %|  %known
-                  ==
-            ==
-      ==
-    ::
-    ==
+    =.  earth-addresses  (~(put by earth-addresses) erp ard)
+    %-  emit
+    %-  ~(addresses make-update ~)
+    :+  %put
+        erp
+        ard
   =.  cor
     %-  emit
     %-  ~(peers make-update ~)
@@ -1214,6 +1258,24 @@
   ?.  was-synced  cor
   %-  emit
   %~  is-synced  make-update  ~
+::
+++  blacklist-address
+  |=  [erp=earth-address reason=@t expiration=(unit @dr)]
+  ^+  cor
+  ?:  (~(has by earth-blacklist) erp)  cor
+  =?  cor  (~(has by earth-addresses) erp)
+    =.  earth-addresses  (~(del by earth-addresses) erp)
+    %-  emit
+    %-  ~(addresses make-update ~)
+    :-  %del
+        erp
+  =/  ban  [now.bowl reason expiration]
+  =.  earth-blacklist  (~(put by earth-blacklist) erp ban)
+  %-  emit
+  %-  ~(blacklist make-update ~)
+  :+  %put
+      erp
+      ban
 ::
 ++  make-version-message
   ^-  message:b-net
@@ -1346,14 +1408,17 @@
     ?~  ads  cor
     =*  adr  i.ads
     =/  new  [id.adr address.adr port.adr]
-    =?  earth-addresses
-        ?&  (peer-services-are-sufficient services.adr)
+    ?.  ?&  (peer-services-are-sufficient services.adr)
             |(?=(%ipv4 id.adr) ?=(%ipv6 id.adr))
-            !(~(has by blacklist) new)
+            !(~(has by earth-blacklist) new)
         ==
+      %=  $
+          ads  t.ads
+      ==
+    =/  ard
+      ^-  $@(~ earth-address-info)
       =/  tim  (de-earth-time time.adr)
       =/  pre  (~(get by earth-addresses) new)
-      %+  ~(put by earth-addresses)  new
       ?~  pre
         %*  p
             p=*earth-address-info
@@ -1365,12 +1430,22 @@
               ?=(%unknown address-rank.u.pre)
               |(?=(~ last-heard.u.pre) (gth tim u.last-heard.u.pre))
           ==
-        u.pre
+        ~
       %_  u.pre
           address-provenance  [%network erp]
           last-heard          [~ tim]
           services            services.adr
       ==
+    =?  earth-addresses  ?=(^ ard)
+      %+  ~(put by earth-addresses)
+          new
+          ard
+    =?  cor  ?=(^ ard)
+      %-  emit
+      %-  ~(addresses make-update ~)
+      :+  %put
+          erp
+          ard
     %=  $
         ads  t.ads
     ==
@@ -1393,12 +1468,17 @@
   ::
       %version
     ~&  >  msg
-    ?.  ?&  !handshake-done.erd
-            (gte version.msg minimum-peer-protocol-version.net-params)
-            (peer-services-are-sufficient services.msg)
-        ==
+    ?:  handshake-done.erd
       %+  disconnect-peer
-          &
+          ['version message after handshake' ~^~d10]
+          erp
+    ?:  (lth version.msg minimum-peer-protocol-version.net-params)
+      %+  disconnect-peer
+          ['incompatible protocol version' ~^~d3]
+          erp
+    ?.  (peer-services-are-sufficient services.msg)
+      %+  disconnect-peer
+          ['insufficient services' ~^~d3]
           erp
     =:  services.erd         services.msg
         starting-height.erd  starting-height.msg
@@ -1415,7 +1495,7 @@
     ~&  >  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
-          &
+          ['wtxidrelay message after handshake' ~^~d10]
           erp
     =.  wtxidrelay.erd  &
     %+  update-peer  erp  erd
@@ -1424,7 +1504,7 @@
     ~&  >  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
-          &
+          ['verack message after handshake' ~^~d10]
           erp
     =.  handshake-done.erd  &
     =.  cor  (update-peer erp erd)
@@ -1441,7 +1521,10 @@
         erp
   ::
       %ping
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['ping message before handshake' ~^~d10]
+          erp
     %-  emit
     %+  send:tcp  erp
     %-  ~(write ne:b-ser network)
@@ -1449,7 +1532,10 @@
     ==
   ::
       %pong
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['pong message before handshake' ~^~d10]
+          erp
     ?~  outbound-ping.erd  cor
     ?.  =(nonce.msg nonce.u.outbound-ping.erd)  cor
     =.  ping-average.erd
@@ -1466,8 +1552,14 @@
   ::
       %addr
     ~&  >>  [%addr (lent addresses.msg)]
-    ?.  handshake-done.erd  (disconnect-peer & erp)
-    ?:  =(~ addresses.msg)  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['addr message before handshake' ~^~d10]
+          erp
+    ?:  =(~ addresses.msg)
+      %+  disconnect-peer
+          ['addr message with null addresses' ~^~d10]
+          erp
     %+  handle-addrv2  erp
     %+  turn  addresses.msg
     |=  adr=address-v1:b-net
@@ -1481,20 +1573,32 @@
   ::
       %addrv2
     ~&  >>  [%addrv2 (lent addresses.msg)]
-    ?.  handshake-done.erd  (disconnect-peer & erp)
-    ?:  =(~ addresses.msg)  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['addrv2 message before handshake' ~^~d10]
+          erp
+    ?:  =(~ addresses.msg)
+      %+  disconnect-peer
+          ['addrv2 message with null addresses' ~^~d10]
+          erp
     %+  handle-addrv2
         erp
         addresses.msg
   ::
       %inv
     ~&  %inv
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['inv message before handshake' ~^~d10]
+          erp
     :: TODO: handle block invs by sending getheaders
     cor
   ::
       %getdata
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['getdata message before handshake' ~^~d10]
+          erp
     |-
     ?~  inventory.msg  cor
     =*  inv  i.inventory.msg
@@ -1521,7 +1625,10 @@
     ==
   ::
       %block
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['block message before handshake' ~^~d10]
+          erp
     :: find a known, valid header corresponding to this block,
     :: and verify this block's transactions against that header's merkle root
     =*  bok  block.msg
@@ -1533,7 +1640,7 @@
     ?.  =(mer merkle-root.block-header.hed)
       ~&  >>>  %block-merkle-root-verification-fail
       %+  disconnect-peer
-          &
+          ['block failed merkle root verification' ~^~d10]
           erp
     :: update any subscriptions pending this block
     :: TODO: cache block
@@ -1622,7 +1729,10 @@
     cor
   ::
       %cfilter
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['cfilter message before handshake' ~^~d10]
+          erp
     ?>  =(0 filter-type.msg)
     :: verify this filter against our filter headers
     =*  fil  filter.msg
@@ -1659,7 +1769,7 @@
     ?.  =(fed this-filter-header)
       ~&  >>>  %block-filter-verification-fail
       %+  disconnect-peer
-          &
+          ['cfilter failed verification' ~^~d10]
           erp
     :: cache the block filter
     =.  filters  (~(put by filters) haz fil)
@@ -1718,7 +1828,10 @@
   ::
       %cfheaders
     ~&  >>  [%filter-headers-from erp]
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['cfheaders message before handshake' ~^~d10]
+          erp
     =/  len  (lent filter-hashes.msg)
     =/  tip  (~(got by filter-headers) block-hash.best-filter-header)
     =/  til  (got:on-bh-index bh-index (add block-height.best-filter-header len))
@@ -1780,7 +1893,10 @@
   ::
       %headers
     ~&  >>  [%headers-from erp]
-    ?.  handshake-done.erd  (disconnect-peer & erp)
+    ?.  handshake-done.erd
+      %+  disconnect-peer
+          ['headers message before handshake' ~^~d10]
+          erp
     =/  is-sync-response
       ?&  ?=(^ header-sync-req)
           ?=(%block-header for.u.header-sync-req)
@@ -1826,7 +1942,9 @@
     ::
         %invalid
       ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
-      %+  disconnect-peer  &  erp
+      %+  disconnect-peer
+          ['invalid block header' ~^~d10]
+          erp
     ::
         %valid
       =*  haz  block-hash.val
@@ -2133,7 +2251,6 @@
         node-compact-filters.required-peer-services  &
         priority-peer-base-ping-average              (div ~s1 2)  :: TODO: find best value
         peer-handshake-timeout                       ~s7
-        blacklist-expiration                         ~d3
         blacklist-interval                           ~d1
         ping-interval                                ~m2
         pending-req-retry-interval                   ~s5
