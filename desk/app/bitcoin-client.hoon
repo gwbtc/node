@@ -12,13 +12,14 @@
       minimum-peer-protocol-version=@ud
       required-peer-services=services:b-net
       priority-peer-base-ping-average=@dr
+      priority-peer-minimum-uptime=@dr
       peer-handshake-timeout=@dr
-      blacklist-interval=@dr
       ping-interval=@dr
       pending-req-retry-interval=@dr
       header-sync-retry-interval=@dr
       tx-inv-broadcast-retry-interval=@dr
       tx-broadcast-cache-expiration=@dr
+      blacklist-cleanup-interval=@dr
   ==
 ::
 +$  earth-peers  (map earth-address earth-peer-state)
@@ -599,7 +600,7 @@
     ~&  %retrying-header-sync
         continue-syncing-headers
   ::
-      [%timer %blacklist ~]
+      [%timer %blacklist-cleanup ~]
     =^  caz  earth-blacklist
       %-  ~(rep by earth-blacklist)
       |=  $:  [key=earth-address val=earth-blacklist-info]
@@ -619,7 +620,7 @@
           key
           val
     %-  emil
-    :-  set-blacklist-timer
+    :-  set-blacklist-cleanup-timer
         caz
   ::
       [%explorer %file-update ~]
@@ -947,12 +948,12 @@
       timer
   %+  weld  /timer/peer-ping  (en-earth-peer-path erp)
 ::
-++  set-blacklist-timer
+++  set-blacklist-cleanup-timer
   ^-  card
-  %.  blacklist-interval:net-params
+  %.  blacklist-cleanup-interval:net-params
   %~  set
       timer
-      /timer/blacklist
+      /timer/blacklist-cleanup
 ::
 ++  set-tx-inv-broadcast-queue-timer
   ^-  card
@@ -1063,16 +1064,18 @@
   ==
 ::
 ++  is-priority-peer
-  |=  pig=ping-average
+  |=  erd=earth-peer-state
   ^-  ?
-  ?~  pig  |
+  ?~  ping-average.erd  |
+  =/  tim  (sub now.bowl connection-opened.erd)
+  ?:  (gte tim priority-peer-minimum-uptime:net-params)  |
   %+  lte
-      u.pig
+      u.ping-average.erd
       get-current-priority-peer-ping-threshold
 ::
 ++  get-current-priority-peer-ping-threshold
   ^-  @dr
-  =/  percent-of-median  80
+  =/  percent-of-median  125
   =/  pis
     %+  murn  ~(tap by earth-peers)
     |=  [erp=earth-address erd=earth-peer-state]
@@ -1092,7 +1095,7 @@
   ^-  @ud
   %-  ~(rep by earth-peers)
   |=  [[erp=earth-address erd=earth-peer-state] num=@ud]
-  ?.  (is-priority-peer ping-average.erd)  num
+  ?.  (is-priority-peer erd)  num
   .+  num
 ::
 ++  get-priority-peer-addresses
@@ -1156,7 +1159,7 @@
     %+  skim  pes
     |=  [erp=earth-address erd=earth-peer-state]
     %-  is-priority-peer
-        ping-average.erd
+        erd
   =/  siz  (lent pes)
   ?:  =(0 siz)  ~
   =/  ind  (~(rad og eny.bowl) siz)
@@ -1238,7 +1241,7 @@
     =.  services.ard  services.u.erd
     =.  last-heard.ard  last-heard.u.erd
     =.  address-rank.ard
-      ?-  (is-priority-peer ping-average.u.erd)
+      ?-  (is-priority-peer u.erd)
           %&  %priority
           %|  %known
       ==
@@ -2244,21 +2247,22 @@
     %_  net-params
         target-addresses                             500
         target-peers                                 10
-        target-priority-peers                        4
+        target-priority-peers                        5
         minimum-peer-protocol-version                70.016
         node-network.required-peer-services          &
         node-witness.required-peer-services          &
         node-compact-filters.required-peer-services  &
         priority-peer-base-ping-average              (div ~s1 2)  :: TODO: find best value
+        priority-peer-minimum-uptime                 ~m1
         peer-handshake-timeout                       ~s7
-        blacklist-interval                           ~d1
         ping-interval                                ~m2
         pending-req-retry-interval                   ~s5
         header-sync-retry-interval                   ~s5
         tx-inv-broadcast-retry-interval              ~s15
         tx-broadcast-cache-expiration                ~s30
+        blacklist-cleanup-interval                   ~d1
     ==
-  =.  cor  (emit set-blacklist-timer)
+  =.  cor  (emit set-blacklist-cleanup-timer)
   %_  cor
       services       services(node-witness &)
   ::
