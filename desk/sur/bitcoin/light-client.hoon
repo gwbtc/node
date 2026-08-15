@@ -2,62 +2,35 @@
     b-net=bitcoin-network
 |%
 ::
-+$  earth-addresses
-  %+  map
-      earth-address
-      earth-address-info
-+$  earth-address
-  $:  net-id=network-address-id:b-net
-      address=@ux
-      port=@ud
++$  bitcoin-client-action
+  $%  [%broadcast-transaction p=broadcast-transaction:action]
+      [%connect-peer p=connect-peer:action]
+      [%disconnect-peer p=disconnect-peer:action]
   ==
-+$  earth-address-info
-  $:  =address-provenance
-      =address-rank
-      =last-heard
-      =services:b-net
-  ==
-+$  earth-peer-info
-  $:  handshake-done=_|
-      wtxidrelay=_|
-      =services:b-net
-      connection-opened=time
-      =last-heard
-      =ping-average
-  ==
-+$  earth-blacklist
-  %+  map
-      earth-address
-      earth-blacklist-info
-+$  earth-blacklist-info
-  $:  when=time
-      reason=@t
-      expiration=(unit @dr)
-  ==
-+$  address-rank
-  $~  %unknown
-  $?  %priority
-      %known
-      %unknown
-  ==
-+$  address-provenance
-  $%  [%userspace ~]
-      [%network who=earth-address]
-  ==
-+$  last-heard    (unit time)
-+$  ping-average  (unit @dr)
 ::
-+$  confirmations  (unit @ud)
-::
-+$  next-block-hash  (unit block-hash)
-::
-+$  block-info
-  $:  =block-hash
-      =block-height
-      =confirmations
-      =next-block-hash
-      =chainwork
++$  bitcoin-client-update
+  $%  [%is-synced p=is-synced:update]
+      [%best-block p=best-block:update]
+      [%block-header-by-hash p=block-header-by-hash:update]
+      [%block-header-by-height p=block-header-by-height:update]
+      [%block-filter-by-hash p=block-filter-by-hash:update]
+      [%block-filter-by-height p=block-filter-by-height:update]
+      [%block-by-hash p=block-by-hash:update]
+      [%block-by-height p=block-by-height:update]
+      [%transaction p=transaction:update]
+      [%peers p=peers:update]
+      [%addresses p=addresses:update]
+      [%blacklist p=blacklist:update]
   ==
+::
+++  action
+  |%
+  ::
+  +$  broadcast-transaction  transaction
+  +$  connect-peer           earth-address
+  +$  disconnect-peer        earth-address
+  ::
+  --
 ::
 ++  update
   |%
@@ -131,6 +104,63 @@
     ==
   ::
   --
+::
++$  earth-addresses
+  %+  map
+      earth-address
+      earth-address-info
++$  earth-address
+  $:  net-id=network-address-id:b-net
+      address=@ux
+      port=@ud
+  ==
++$  earth-address-info
+  $:  =address-provenance
+      =address-rank
+      =last-heard
+      =services:b-net
+  ==
++$  earth-peer-info
+  $:  handshake-done=_|
+      wtxidrelay=_|
+      =services:b-net
+      connection-opened=time
+      =last-heard
+      =ping-average
+  ==
++$  earth-blacklist
+  %+  map
+      earth-address
+      earth-blacklist-info
++$  earth-blacklist-info
+  $:  when=time
+      reason=@t
+      expiration=(unit @dr)
+  ==
++$  address-rank
+  $~  %unknown
+  $?  %priority
+      %known
+      %unknown
+  ==
++$  address-provenance
+  $%  [%userspace ~]
+      [%network who=earth-address]
+  ==
++$  last-heard    (unit time)
++$  ping-average  (unit @dr)
+::
++$  confirmations  (unit @ud)
+::
++$  next-block-hash  (unit block-hash)
+::
++$  block-info
+  $:  =block-hash
+      =block-height
+      =confirmations
+      =next-block-hash
+      =chainwork
+  ==
 ::
 --
 

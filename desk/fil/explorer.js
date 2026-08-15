@@ -103,32 +103,39 @@ async function handleChannelStream(event) {
   sendActions([makeAck(msg.id)]);
   //if (msg.response === 'quit') // TODO: resubscribe to the subPath associated with msg.id
   if (msg.response !== 'diff') return;
+  if (msg.mark !== 'bitcoin-client-update') return;
 
-  // console.log(msg.mark);
+  const update = parseBitcoinClientUpdate(msg.json);
+  if (!update) return;
 
-  if (msg.mark === 'bitcoin-client-is-synced') {
-    handleIsSynced(msg.json);
+  if (update.type === 'is-synced') {
+    handleIsSynced(update.data);
+  } else if (update.type === 'best-block' && bestBlockSubscribed) {
+    handleBestBlockUpdate(update.data);
+  } else if (update.type === 'peers') {
+    handlePeers(update.data);
+  } else if (update.type === 'addresses') {
+    handleAddresses(update.data);
+  } else if (update.type === 'blacklist') {
+    handleBlacklist(update.data);
+  } else if (update.type === 'block-by-height') {
+    handleBlock(update.data);
   }
+}
 
-  if (msg.mark === 'bitcoin-client-best-block' && bestBlockSubscribed) {
-    handleBestBlock(msg.json);
-  }
+function parseBitcoinClientUpdate(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+  const entries = Object.entries(json);
+  if (entries.length !== 1) return null;
+  return { type: entries[0][0], data: entries[0][1] };
+}
 
-  if (msg.mark === 'bitcoin-client-peers') {
-    handlePeers(msg.json);
+function unwrapBitcoinClientUpdate(json, expectedType) {
+  const update = parseBitcoinClientUpdate(json);
+  if (!update || update.type !== expectedType) {
+    throw new Error(`Expected bitcoin-client ${expectedType} update`);
   }
-
-  if (msg.mark === 'bitcoin-client-addresses') {
-    handleAddresses(msg.json);
-  }
-
-  if (msg.mark === 'bitcoin-client-blacklist') {
-    handleBlacklist(msg.json);
-  }
-
-  if (msg.mark === 'bitcoin-client-block-by-height') {
-    handleBlock(msg.json);
-  }
+  return update.data;
 }
 
 function peerKey(address) {
@@ -291,9 +298,12 @@ async function pollBestBlock() {
       throw new Error(`Best block scry failed with status ${response.status}`);
     }
 
-    const bestBlockJson = await response.json();
+    const bestBlockJson = unwrapBitcoinClientUpdate(
+      await response.json(),
+      'best-block'
+    );
     if (!explorerState.isSynced) {
-      handleBestBlock(bestBlockJson, { requireVisibleTip: true });
+      handleBestBlockUpdate(bestBlockJson, { requireVisibleTip: true });
     }
   } catch {
     // A later poll will retry while the light client is still syncing.
@@ -368,6 +378,33 @@ function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
   }
 }
 
+function handleBestBlockUpdate(bestBlockUpdate, options = {}) {
+  if (bestBlockUpdate?.['block-height'] !== undefined &&
+      bestBlockUpdate?.['block-hash']) {
+    handleBestBlock(bestBlockUpdate, options);
+    return;
+  }
+
+  const lastCommon = bestBlockUpdate?.['last-common'];
+  if (!lastCommon) return;
+
+  for (const staleBlock of bestBlockUpdate['stale-branch'] ?? []) {
+    const height = Number(staleBlock['block-height']);
+    const hash = staleBlock['block-hash'];
+    explorerState.headers.delete(hash);
+    explorerState.blocks.delete(hash);
+    if (explorerState.headerHashesByHeight.get(height) === hash) {
+      explorerState.headerHashesByHeight.delete(height);
+    }
+    if (explorerState.selectedBlock?.hash === hash) {
+      explorerState.selectedBlock = null;
+      explorerState.transactionPage = 0;
+    }
+  }
+
+  handleBestBlock(lastCommon, options);
+}
+
 function formatHoonDecimal(number) {
   return String(number).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
@@ -417,7 +454,13 @@ async function scryBlockHeader(path) {
   if (!response.ok) {
     throw new Error(`Header scry failed with status ${response.status}`);
   }
-  return response.json();
+  const responseJson = await response.json();
+  const update = parseBitcoinClientUpdate(responseJson);
+  if (!update || (update.type !== 'block-header-by-height' &&
+                  update.type !== 'block-header-by-hash')) {
+    throw new Error('Unexpected block header scry response');
+  }
+  return update.data;
 }
 
 function handleHeaderScryError(type, value) {
@@ -864,15 +907,15 @@ function makeUnsubscribe(subPath) {
   };
 }
 
-function makePoke(mark, jsonData) {
+function makeBitcoinClientAction(action, jsonData) {
   channelActId++;
   return {
     id: channelActId,
     action: 'poke',
     ship: our,
     app: app,
-    mark: mark,
-    json: jsonData
+    mark: 'bitcoin-client-action',
+    json: { [action]: jsonData }
   };
 }
 
@@ -892,8 +935,8 @@ async function disconnectPeer(peer) {
 
   try {
     const response = await sendActions([
-      makePoke(
-        'bitcoin-client-disconnect-peer',
+      makeBitcoinClientAction(
+        'disconnect-peer',
         earthAddressJson(peer.address)
       )
     ]);

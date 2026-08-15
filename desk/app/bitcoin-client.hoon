@@ -107,9 +107,8 @@
   |=  [mak=mark vaz=vase]
   ^+  cor
   ?>  =(src.bowl our.bowl)
-  ?+  mak  ~|(bad-poke/mak !!) 
+  ?:  ?=(%log-info mak)
   ::
-      %log-info
     ~&       [%network network]
     ~&       [%services services]
     ~&       [%protocol-version protocol-version]
@@ -132,8 +131,12 @@
     ~&  >>   [%priority-peers get-priority-peer-count]
     cor
   ::
+  ?.  ?=(%bitcoin-client-action mak)  ~|(bad-poke/mak !!)
+  =/  act  !<(bitcoin-client-action vaz)
+  ?-  -.act
+  ::
       %broadcast-transaction
-    =/  txn  !<(transaction vaz)
+    =*  txn  p.act
     ?:  .?(tx-inv-broadcast-queue)
       %_  cor
           tx-inv-broadcast-queue  (snoc tx-inv-broadcast-queue txn)
@@ -145,9 +148,11 @@
     %-  broadcast-tx-inv
         txn
   ::
-      %bitcoin-client-connect-peer
-    =/  erp  !<(earth-address vaz)
-    ?.  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
+      %connect-peer
+    =*  erp  p.act
+    ?.  ?|  ?=(%ipv4 net-id.erp)
+            ?=(%ipv6 net-id.erp)
+        ==
       ~&  >>>  [%need-ipv4-or-ipv6 erp]
       !!
     =?  cor  !(~(has by earth-addresses) erp)
@@ -171,8 +176,8 @@
     %-  connect-to-peer
         erp
   ::
-      %bitcoin-client-disconnect-peer
-    =/  erp  !<(earth-address vaz)
+      %disconnect-peer
+    =*  erp  p.act
     %+  disconnect-peer
         ~
         erp
@@ -192,16 +197,18 @@
   ::
       [%x %is-synced ~]
     :+  ~  ~
-    :-  %bitcoin-client-is-synced
+    :-  %bitcoin-client-update
     !>
-    ^-  is-synced:update
+    ^-  bitcoin-client-update
+    :-  %is-synced
         is-fully-synced
   ::
       [%x %best-block ~]
     :+  ~  ~
-    :-  %bitcoin-client-best-block
+    :-  %bitcoin-client-update
     !>
-    ^-  best-block:update
+    ^-  bitcoin-client-update
+    :-  %best-block
     :+  %new
         block-height.best-block
         block-hash.best-block
@@ -219,9 +226,10 @@
           chainwork.u.hed
       ==
     :+  ~  ~
-    :-  %bitcoin-client-block-header-by-hash
+    :-  %bitcoin-client-update
     !>
-    ^-  block-header-by-hash:update
+    ^-  bitcoin-client-update
+    :-  %block-header-by-hash
         dat
   ::
       [%x %block-header %height block-height=@ta ~]
@@ -238,16 +246,18 @@
           chainwork.u.hed
       ==
     :+  ~  ~
-    :-  %bitcoin-client-block-header-by-height
+    :-  %bitcoin-client-update
     !>
-    ^-  block-header-by-height:update
+    ^-  bitcoin-client-update
+    :-  %block-header-by-height
         dat
   ::
       [%x %peers ~]
     :+  ~  ~
-    :-  %bitcoin-client-peers
+    :-  %bitcoin-client-update
     !>
-    ^-  peers:update
+    ^-  bitcoin-client-update
+    :-  %peers
     :-  %all
     %-  ~(urn by earth-peers)
     |=  [erp=earth-address erd=earth-peer-state]
@@ -802,13 +812,13 @@
     ^-  card
     =/  dat  `is-synced:update`is-fully-synced
     =/  paf  /is-synced
-    %+  fact  paf  [%bitcoin-client-is-synced !>(dat)]
+    %+  fact  paf  [%is-synced dat]
   ::
   ++  best-block
     |=  dat=best-block:update
     ^-  card
     =/  paf  /best-block
-    %+  fact  paf  [%bitcoin-client-best-block !>(dat)]
+    %+  fact  paf  [%best-block dat]
   ::
   ++  block-header-by-hash
     |_  haz=block-hash
@@ -817,7 +827,7 @@
     ++  res
       |=  dat=block-header-by-hash:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-header-by-hash !>(dat))
+      :~  (fact sub %block-header-by-hash dat)
           end
       ==
     --
@@ -829,7 +839,7 @@
     ++  res
       |=  dat=block-header-by-height:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-header-by-height !>(dat))
+      :~  (fact sub %block-header-by-height dat)
           end
       ==
     --
@@ -841,7 +851,7 @@
     ++  res
       |=  dat=block-filter-by-hash:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-filter-by-hash !>(dat))
+      :~  (fact sub %block-filter-by-hash dat)
           end
       ==
     --
@@ -853,7 +863,7 @@
     ++  res
       |=  dat=block-filter-by-height:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-filter-by-height !>(dat))
+      :~  (fact sub %block-filter-by-height dat)
           end
       ==
     --
@@ -865,7 +875,7 @@
     ++  res
       |=  dat=block-by-hash:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-by-hash !>(dat))
+      :~  (fact sub %block-by-hash dat)
           end
       ==
     --
@@ -877,7 +887,7 @@
     ++  res
       |=  dat=block-by-height:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-block-by-height !>(dat))
+      :~  (fact sub %block-by-height dat)
           end
       ==
     --
@@ -889,7 +899,7 @@
     ++  res
       |=  dat=transaction:update
       ^-  (list card)
-      :~  (fact sub %bitcoin-client-transaction !>(dat))
+      :~  (fact sub %transaction dat)
           end
       ==
     --
@@ -898,22 +908,27 @@
     |=  dat=peers:update
     ^-  card
     =/  paf  /peers
-    %+  fact  paf  [%bitcoin-client-peers !>(dat)]
+    %+  fact  paf  [%peers dat]
   ::
   ++  addresses
     |=  dat=addresses:update
     ^-  card
     =/  paf  /addresses
-    %+  fact  paf  [%bitcoin-client-addresses !>(dat)]
+    %+  fact  paf  [%addresses dat]
   ::
   ++  blacklist
     |=  dat=blacklist:update
     ^-  card
     =/  paf  /blacklist
-    %+  fact  paf  [%bitcoin-client-blacklist !>(dat)]
+    %+  fact  paf  [%blacklist dat]
   ::
-  ++  fact  |=([paf=path cag=cage] `card`[%give %fact ?-(for ~ paf^~, ^ ~) cag])
   ++  kick  |=(paf=path `card`[%give %kick paf^~ for])
+  ++  fact
+    |=  [paf=path upd=bitcoin-client-update]
+    ^-  card
+    =;  cag  [%give %fact ?-(for ~ paf^~, ^ ~) cag]
+    :-  %bitcoin-client-update
+    !>  upd
   ::
   --
 ::
@@ -1068,7 +1083,7 @@
   ^-  ?
   ?~  ping-average.erd  |
   =/  tim  (sub now.bowl connection-opened.erd)
-  ?:  (gte tim priority-peer-minimum-uptime:net-params)  |
+  ?:  (lth tim priority-peer-minimum-uptime:net-params)  |
   %+  lte
       u.ping-average.erd
       get-current-priority-peer-ping-threshold
