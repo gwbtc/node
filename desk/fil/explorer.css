@@ -360,14 +360,41 @@ dd {
 
 .peers-panel__header {
   gap: 12px;
-  padding: 17px 18px;
+  padding: 12px;
   border-bottom-color: #353b36;
 }
 
-.peers-panel__title {
+.peers-panel__tabs {
+  display: flex;
+  min-width: 0;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #353b36;
+  border-radius: 7px;
+  background: #171b18;
+}
+
+.peers-panel__tab {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 4px;
+  color: #858c86;
+  background: transparent;
+  font: 650 0.6rem/1 var(--explorer-mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.peers-panel__tab:hover,
+.peers-panel__tab:focus-visible {
+  color: #d6dbd7;
+  outline: none;
+}
+
+.peers-panel__tab--selected {
   color: #f7931a;
-  font-size: 1.05rem;
-  font-weight: 750;
+  background: #29251e;
 }
 
 .peers-panel__count {
@@ -383,6 +410,12 @@ dd {
   overflow-y: auto;
   padding: 12px;
   scrollbar-color: #4a514b transparent;
+}
+
+.peers-panel__pagination {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid #353b36;
 }
 
 .peer-card {
@@ -516,6 +549,73 @@ dd {
   background: #1d221e;
   font-size: 0.59rem;
   line-height: 1.2;
+}
+
+.network-entry-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.network-entry-card--connected {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #343936;
+  border-radius: 6px;
+  background: #1d211e;
+  opacity: 0.52;
+}
+
+.network-entry-card--connected .peer-card__endpoint {
+  color: #a0a6a1;
+  font-size: 0.64rem;
+}
+
+.network-entry-card__connected-label {
+  flex: none;
+  color: #858c86;
+  font-family: var(--explorer-mono);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.network-entry-card__badge {
+  flex: none;
+  padding: 3px 5px;
+  border: 1px solid #3b433c;
+  border-radius: 4px;
+  color: #8f9690;
+  font-family: var(--explorer-mono);
+  font-size: 0.56rem;
+  line-height: 1;
+}
+
+.network-entry-card__badge--priority {
+  border-color: #77501f;
+  color: #f7931a;
+}
+
+.network-entry-card__badge--known {
+  border-color: #3b6347;
+  color: #72bd88;
+}
+
+.network-entry-card--blacklisted {
+  border-color: #68403b;
+}
+
+.network-entry-card__reason {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  color: #d7a19b;
+  font-family: var(--explorer-mono);
+  font-size: 0.66rem;
+  line-height: 1.4;
 }
 
 .peers-panel__empty {
