@@ -1,5 +1,5 @@
 /-  *bitcoin-common,
-    *bitcoin-light-client,
+    *bitcoin-client,
     b-net=bitcoin-network
 /+  b-val=bitcoin-validation,
     b-ser=bitcoin-serialization,
@@ -2207,7 +2207,6 @@
         ;link(href "explorer.css", rel "stylesheet");
       ==
       ;body
-        ;p:"test"
         ;script(src "explorer.js");
       ==
     ==

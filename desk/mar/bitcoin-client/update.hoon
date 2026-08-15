@@ -1,4 +1,4 @@
-/-  *bitcoin-light-client,
+/-  *bitcoin-client,
     b-net=bitcoin-network
 |_  upd=bitcoin-client-update
 ::
