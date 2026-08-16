@@ -1,5 +1,4 @@
-/-  *bitcoin-common,
-    *bitcoin-client,
+/-  *bitcoin-client,
     b-net=bitcoin-network
 /+  b-val=bitcoin-validation,
     b-ser=bitcoin-serialization,
@@ -24,8 +23,9 @@
 ::
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
-  $:  handshake-done=_|
+  $:  got-version=_|
       wtxidrelay=_|
+      handshake-done=_|
       starting-height=block-height
       =services:b-net
       connection-opened=time
@@ -1490,6 +1490,10 @@
       %+  disconnect-peer
           ['version message after handshake' ~^~d10]
           erp
+    ?:  got-version.erd
+      %+  disconnect-peer
+          ['redundant version message' ~^~d10]
+          erp
     ?:  (lth version.msg minimum-peer-protocol-version.net-params)
       %+  disconnect-peer
           ['incompatible protocol version' ~^~d3]
@@ -1498,7 +1502,8 @@
       %+  disconnect-peer
           ['insufficient services' ~^~d3]
           erp
-    =:  services.erd         services.msg
+    =:  got-version.erd      &
+        services.erd         services.msg
         starting-height.erd  starting-height.msg
       ==
     =.  cor  (update-peer erp erd)
@@ -1515,6 +1520,10 @@
       %+  disconnect-peer
           ['wtxidrelay message after handshake' ~^~d10]
           erp
+    ?.  got-version.erd
+      %+  disconnect-peer
+          ['wtxidrelay message before version message' ~^~d10]
+          erp
     =.  wtxidrelay.erd  &
     %+  update-peer  erp  erd
   ::
@@ -1523,6 +1532,10 @@
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['verack message after handshake' ~^~d10]
+          erp
+    ?.  got-version.erd
+      %+  disconnect-peer
+          ['verack message before version message' ~^~d10]
           erp
     =.  handshake-done.erd  &
     =.  cor  (update-peer erp erd)
