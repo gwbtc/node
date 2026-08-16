@@ -1422,6 +1422,21 @@
   |=  [erp=earth-address ads=(list address-v2:b-net)]
   ^+  cor
   =.  cor
+    =/  len  ~(wyt in earth-addresses)
+    =/  replaceable-addrs
+      %+  skip  ~(tap by earth-addresses)
+      |=  [erp=earth-address ard=earth-address-info]
+      ?|  ?=(%priority address-rank.ard)
+          ?=(%userspace -.address-provenance.ard)
+      ==
+    =.  replaceable-addrs
+      %+  sort  replaceable-addrs
+      |=  [a=[* earth-address-info] b=[* earth-address-info]]
+      ?~  last-heard.a  &
+      ?~  last-heard.b  |
+      %+  lth
+          u.last-heard.a
+          u.last-heard.b
     |-
     ?~  ads  cor
     =*  adr  i.ads
@@ -1433,10 +1448,10 @@
       %=  $
           ads  t.ads
       ==
+    =/  pre  (~(get by earth-addresses) new)
     =/  ard
       ^-  $@(~ earth-address-info)
       =/  tim  (de-earth-time time.adr)
-      =/  pre  (~(get by earth-addresses) new)
       ?~  pre
         %*  p
             p=*earth-address-info
@@ -1454,16 +1469,41 @@
           last-heard          [~ tim]
           services            services.adr
       ==
-    =?  earth-addresses  ?=(^ ard)
-      %+  ~(put by earth-addresses)
-          new
-          ard
-    =?  cor  ?=(^ ard)
+    ?~  ard
+      %=  $
+          ads  t.ads
+      ==
+    =/  evict-old-address
+      ?&  ?=(~ pre)
+          (gte len target-addresses:net-params)
+      ==
+    ?:  &(evict-old-address ?=(~ replaceable-addrs))
+      %=  $
+          ads  t.ads
+      ==
+    =?  cor  evict-old-address
+      ?~  replaceable-addrs  cor
+      =.  earth-addresses
+        %-  ~(del by earth-addresses)
+            p.i.replaceable-addrs
+      %-  emit
+      %-  ~(addresses make-update ~)
+      :-  %del
+          p.i.replaceable-addrs
+    =?  replaceable-addrs  evict-old-address
+      ?~  replaceable-addrs  ~
+          t.replaceable-addrs
+    =.  cor
+      =.  earth-addresses
+        %+  ~(put by earth-addresses)
+            new
+            ard
       %-  emit
       %-  ~(addresses make-update ~)
       :+  %put
           new
           ard
+    =?  len  &(?=(~ pre) !evict-old-address)  +(len)
     %=  $
         ads  t.ads
     ==
