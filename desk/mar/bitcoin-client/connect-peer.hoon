@@ -18,13 +18,13 @@
       ==
     =/  nid=network-address-id:b-net
       ?+  network-id.raw  !!
-          'ipv4'       %ipv4
-          'ipv6'       %ipv6
-          'torv2'      %torv2
-          'torv3'      %torv3
-          'i2p'        %i2p
-          'cjdns'      %cjdns
-          'yggdrasil'  %yggdrasil
+          %'ipv4'       %ipv4
+          %'ipv6'       %ipv6
+          %'torv2'      %torv2
+          %'torv3'      %torv3
+          %'i2p'        %i2p
+          %'cjdns'      %cjdns
+          %'yggdrasil'  %yggdrasil
       ==
     =/  add  (need (de:base16:mimes:html address.raw))
     ?>  =((network-address-width nid) p.add)

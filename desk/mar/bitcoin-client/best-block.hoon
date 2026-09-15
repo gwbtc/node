@@ -22,8 +22,8 @@
         %reorg-rollback
       :-  %o
       %-  ~(gas by *(map @t ^json))
-      :~  ['block-height' %n (crip ((d-co:co 1) block-height.bes))]
-          ['block-hash' %s (en:base16:mimes:html 32 block-hash.bes)]
+      :~  ['block-height' %n (crip ((d-co:co 1) block-height.last-common.bes))]
+          ['block-hash' %s (en:base16:mimes:html 32 block-hash.last-common.bes)]
       ==
     ::
     ==

@@ -440,18 +440,31 @@
 :: +de
 ::   deserialization core
 ++  de
-  |_  byt=hexb
+  ::  A cursor over .byt: .pos bytes have been consumed.
+  ::
+  ::  Reading a field used to shift the whole remaining buffer
+  ::  (`(rsh [3 wid] dat.byt)`), and a shift copies the atom -- so
+  ::  deserialising a 2 MB block, ~100k field reads, copied on the order
+  ::  of 100 GB and took tens of seconds.  +de-peek now reads at the
+  ::  cursor and +de-read only moves it.  The remainder is materialised
+  ::  once, in +de-abet, for the one caller that keeps it (the network
+  ::  +read's carry-over buffer); +de-left answers "how much is left"
+  ::  without materialising.  Same bytes, same results: +cut at .pos is
+  ::  exactly what +end read from the shifted buffer.
+  ::
+  |_  [byt=hexb pos=@ud]
   ++  de-core  .
-  ++  de-abet  byt
-  ++  de-abed  |=(leb=hexb de-core(byt leb))
-  ++  de-peek  |=(wid=@ud (end [3 wid] dat.byt))
+  ++  de-abet
+    ^-  hexb
+    ?:  =(0 pos)  byt
+    [de-left (rsh [3 pos] dat.byt)]
+  ++  de-abed  |=(leb=hexb de-core(byt leb, pos 0))
+  ++  de-left  ?:((lth pos wid.byt) (sub wid.byt pos) 0)
+  ++  de-peek  |=(wid=@ud (cut 3 [pos wid] dat.byt))
   ++  de-read
     |=  wid=@ud
     :-  (de-peek wid)
-    %_  de-core
-        wid.byt  ?:((lth wid wid.byt) (sub wid.byt wid) 0)
-        dat.byt  (rsh [3 wid] dat.byt)
-    ==
+    de-core(pos (add pos wid))
   ::
   ++  de-compactsize
     ^-  [@ _de-core]
@@ -1216,7 +1229,7 @@
       :-  (add wid.buffer wid.new)
           (can 3 [buffer new ~])
     |^
-    ?:  (lth wid:de-abet:de-core network-message-header-size)
+    ?:  (lth de-left:de-core network-message-header-size)
       :-  (flop messages)
           de-abet:de-core
     =/  try  try-read
@@ -1246,7 +1259,7 @@
       ?~  bys  %none
       =^  hed  de-core  de-network-message-header:de-core
       ?:  (gth payload-size.hed network-message-max-payload-size)  %none
-      ?:  (lth wid:de-abet:de-core payload-size.hed)  %wait
+      ?:  (lth de-left:de-core payload-size.hed)  %wait
       =/  checksum
         %-  make-message-checksum:network-helpers
         :-  payload-size.hed

@@ -87,13 +87,39 @@
       =filters
       =block-headers
   ==
+::  state-1: state-0 plus the peer-sweep slot -- when the sweep timer
+::  (+set-peer-sweep-timer) was last armed, so that +load on an upgrade
+::  does not arm a second one alongside the one already ticking.
+::
++$  state-1
+  $:  =network:b-net
+      =protocol-version:b-net
+      =services:b-net
+      =net-params
+      =earth-peers
+      =earth-addresses
+      =blacklist
+      =pending-block-hash-reqs
+      =pending-block-height-reqs
+      =header-sync-req
+      =tx-inv-broadcast-queue
+      =tx-broadcast-cache
+      =best-block
+      =bh-index
+      =best-filter-header
+      =filter-headers
+      =filters
+      =block-headers
+      peer-sweep=(unit @da)
+  ==
 +$  state-n
   $%  [%0 state-0]
+      [%1 state-1]
   ==
 +$  card  card:agent:gall
 --
 ::
-=|  $>(%0 state-n)
+=|  $>(%1 state-n)
 =*  state  -
 =>
 ::
@@ -165,6 +191,18 @@
       %bitcoin-client-disconnect-peer
     =/  erp  !<(earth-address vaz)
     %+  disconnect-peer  |  erp
+  ::  Drop every peer, banning none.  The supervisor's recovery after a
+  ::  sidecar restart, when this agent may still believe its connections
+  ::  are live (gwsup.sh has poked this mark since 2026-08; until now the
+  ::  poke nacked and the peer table was never cleared).  Each
+  ::  +disconnect-peer refills from the address book.
+  ::
+      %kill-peer-connections
+    =/  erps  ~(tap in ~(key by earth-peers))
+    |-
+    ?~  erps  cor
+    =.  cor  (disconnect-peer | i.erps)
+    $(erps t.erps)
   ::
   ==
 ::
@@ -470,6 +508,35 @@
     %+  disconnect-peer  &
         erp
   ::
+  ::  A connect that never came back: no %connected, no %error, no nack,
+  ::  in all of +peer-connect-timeout.  Nothing is coming (the sidecar's
+  ::  own connect deadline is 30 s and it reports through %error).  Drop
+  ::  the entry, no ban: from here a dead peer and a lost lick message
+  ::  look alike.  The age check keeps a timer left over from an earlier
+  ::  connection to the same address from reaping a fresh one.
+  ::
+      [%timer %peer-connect-timeout earth-peer=*]
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    =/  erd  (~(get by earth-peers) erp)
+    ?~  erd  cor
+    ?.  ?=([%behn %wake *] sin)  cor
+    ?:  handshake-done.u.erd  cor
+    ?:  (peer-is-young u.erd)  cor
+    ~&  >>>  [%peer-connect-timeout erp]
+    (disconnect-peer | erp)
+  ::  The sweep: every +peer-sweep-interval, reap connects that went
+  ::  stale without their timer ever firing (a timer lost across an
+  ::  upgrade, a lick message that never arrived), then top the peer set
+  ::  back up.  This is the one path that runs with NO peers and NO
+  ::  traffic -- the case every other reconnect trigger (a disconnect, an
+  ::  addr message) cannot reach.
+  ::
+      [%timer %peer-sweep ~]
+    ?.  ?=([%behn %wake *] sin)  cor
+    =.  cor  arm-peer-sweep
+    =.  cor  reap-stale-peers
+    connect-to-more-peers
+  ::
       [%timer %peer-ping earth-peer=*]
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(get by earth-peers) erp)
@@ -477,7 +544,13 @@
     ?.  ?=([%behn %wake *] sin)  cor
     :: if the previous ping hasn't been answered, disconnect and ban
     ?:  .?(outbound-ping.u.erd)
-      %+  disconnect-peer  &  :: TODO: this currently will timeout and ban any peer if the sidecar is disconnected
+      ::  Unanswered ping: drop the peer, but do not ban it.  From here
+      ::  a dead peer and a dead sidecar look the same, and a three-day
+      ::  ban of every live peer after a local sidecar crash is what
+      ::  emptied the address book.  A peer that is really gone comes
+      ::  back through gossip and fails again cheaply.
+      ::
+      %+  disconnect-peer  |
           erp
     %-  send-ping
         erp
@@ -506,7 +579,7 @@
       [%timer %pending-req %block %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.wir)
     :: TODO: make less janky
-    ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter])  cor
+    ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter ~])  cor
     =.  cor  (emit (set-pending-block-hash-req-timer haz [%block ~]))
     =/  som  (get-some-peer &)
     ?~  som  cor
@@ -534,7 +607,7 @@
     =/  het  (slav %ud block-height.wir)
     =/  haz  (got:on-bh-index bh-index het)
     :: TODO: make less janky
-    ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter])  cor
+    ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter ~])  cor
     =.  cor  (emit (set-pending-block-height-req-timer het [%block ~]))
     =/  som  (get-some-peer &)
     ?~  som  cor
@@ -598,10 +671,50 @@
   ^+  cor
   ?+  wir  cor
   ::
-      [%tcp earth-peer=*]
-    ?.  ?=(%fact -.sin)  cor
+  ::  A %connect poke that %tcp nacks yields neither %connected nor
+  ::  %error, so the peer entry it made would sit in .earth-peers for
+  ::  good; a nacked %send means the connection is already gone.  These
+  ::  cases must precede the bare /tcp/<peer> one, whose earth-peer=*
+  ::  would swallow their wires.
+  ::
+      [%tcp %connect earth-peer=*]
+    ?.  ?=(%poke-ack -.sin)  cor
+    ?~  p.sin  cor
     =/  erp  (de-earth-peer-path earth-peer.wir)
-    =/  erd  (~(got by earth-peers) erp)
+    ~&  >>>  [%tcp-connect-nack erp]
+    (disconnect-peer | erp)
+  ::
+      [%tcp %poke earth-peer=*]
+    ?.  ?=(%poke-ack -.sin)  cor
+    ?~  p.sin  cor
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    ~&  >>>  [%tcp-send-nack erp]
+    (disconnect-peer | erp)
+  ::
+      [%tcp %watch earth-peer=*]
+    cor
+  ::
+      [%tcp earth-peer=*]
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    ::  %tcp kicks the wire when the socket closes, on an error, and
+    ::  when the sidecar itself dies; a rejected watch means %tcp is not
+    ::  there at all.  Either way the peer is gone.
+    ::
+    ?:  ?=(%kick -.sin)
+      ~&  >>>  [%tcp-kicked erp]
+      (disconnect-peer | erp)
+    ?:  ?=(%watch-ack -.sin)
+      ?~  p.sin  cor
+      ~&  >>>  [%tcp-watch-nack erp]
+      (disconnect-peer | erp)
+    ?.  ?=(%fact -.sin)  cor
+    ::  +get, not +got: +disconnect-peer deletes the entry and then
+    ::  pokes %close, whose %closed fact still arrives here on the open
+    ::  subscription.  +got on the missing key crashed the whole event.
+    ::
+    =/  urd  (~(get by earth-peers) erp)
+    ?~  urd  cor
+    =/  erd  u.urd
     =/  gif  !<(gift:tcp q.cage.sin)
     ?-  -.gif
     ::
@@ -637,7 +750,13 @@
     ::
         %error
       ~&  >>>  [%tcp-error erp msg.gif]
-      %+  disconnect-peer  &  erp
+      ::  'sidecar disconnected' is %tcp's own report that the LOCAL
+      ::  sidecar died (tcp.hoon, on lick %disconnect) -- our fault, not
+      ::  the peer's.  Banning on it burned the whole working peer set
+      ::  for three days on every sidecar crash.  A real transport error
+      ::  (connect timeout, refused) still bans.
+      ::
+      %+  disconnect-peer  !=('sidecar disconnected' msg.gif)  erp
     ::
     ==
   ::
@@ -892,6 +1011,73 @@
   %~  set
       timer
   %+  weld  /timer/peer-ping  (en-earth-peer-path erp)
+::  Peer-set upkeep.  Constants rather than net-params: net-params is
+::  persisted state, and a new field there would change the state shape.
+::
+::  +peer-connect-timeout: how long a %connect may go unanswered before
+::  its entry is dropped.  Longer than the sidecar's own 30 s connect
+::  deadline, so a peer that is merely slow is reported by the sidecar
+::  (through %error, which bans) rather than reaped here (which does not).
+::
+++  peer-connect-timeout  ~s45
+++  peer-sweep-interval   ~m1
+::
+++  peer-is-young
+  |=  erd=earth-peer-state
+  ^-  ?
+  (gte (add connection-opened.erd peer-connect-timeout) now.bowl)
+::
+++  set-peer-connect-timeout-timer
+  |=  erp=earth-address
+  ^-  card
+  %.  peer-connect-timeout
+  %~  set
+      timer
+  %+  weld  /timer/peer-connect-timeout  (en-earth-peer-path erp)
+::
+++  set-peer-sweep-timer
+  ^-  card
+  %.  peer-sweep-interval
+  %~  set
+      timer
+      /timer/peer-sweep
+::
+++  arm-peer-sweep
+  ^+  cor
+  =.  peer-sweep  `(add now.bowl peer-sweep-interval)
+  (emit set-peer-sweep-timer)
+::
+::  +counted-peers: the peers +connect-to-more-peers measures against
+::  .target-peers -- live ones, plus connects still young enough to be
+::  in progress.  A connect that never completed (sidecar down at that
+::  moment, a lost lick message) used to count forever: at ten of them
+::  every reconnect was silenced for good.
+::
+++  counted-peers
+  ^-  @ud
+  %-  lent
+  %+  skim  ~(tap by earth-peers)
+  |=  [erp=earth-address erd=earth-peer-state]
+  ?|  handshake-done.erd
+      (peer-is-young erd)
+  ==
+::
+::  +reap-stale-peers: drop every connect that is neither live nor young
+::
+++  reap-stale-peers
+  ^+  cor
+  =/  stale=(list earth-address)
+    %+  murn  ~(tap by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+    ^-  (unit earth-address)
+    ?:  handshake-done.erd  ~
+    ?:  (peer-is-young erd)  ~
+    `erp
+  |-
+  ?~  stale  cor
+  ~&  >>>  [%peer-stale-reaped i.stale]
+  =.  cor  (disconnect-peer | i.stale)
+  $(stale t.stale)
 ::
 ++  set-blacklist-timer
   ^-  card
@@ -1132,14 +1318,17 @@
         erp
     %-  make-earth-peer-info
         erd
+  ::  the handshake timer starts at %connected; this one covers the
+  ::  connect itself never being answered at all
+  ::
   %-  emil
-  %-  open:tcp
-      erp
+  :_  (open:tcp erp)
+  (set-peer-connect-timeout-timer erp)
 ::
 ++  connect-to-more-peers
   ^+  cor
   =*  target  target-peers.net-params
-  =/  num-peers  ~(wyt in earth-peers)
+  =/  num-peers  counted-peers
   ?:  (gte num-peers target)  cor
   =/  ads  (get-n-new-addresses (sub target num-peers))
   |-
@@ -2136,6 +2325,7 @@
         tx-broadcast-cache-expiration                ~s30
     ==
   =.  cor  (emit set-blacklist-timer)
+  =.  cor  arm-peer-sweep
   %_  cor
       services       services(node-witness &)
   ::
@@ -2161,8 +2351,28 @@
       ~&  >>>  [dap.bowl %load-state-reset]
       init
     ?-  -.u.old
-      %0  cor(state u.old)
+      %1  cor(state u.old)
+    ::  %0 -> %1: the peer-sweep slot (armed below), and a gentler block
+    ::  re-request interval -- a 2 MB block from a slow peer was asked of
+    ::  another peer every 5 s, and with no block cache each copy that
+    ::  arrived was deserialised again.
+    ::
+        %0
+      =/  o=state-0  +.u.old
+      =/  new=state-1
+        :*  network.o  protocol-version.o  services.o  net-params.o
+            earth-peers.o  earth-addresses.o  blacklist.o
+            pending-block-hash-reqs.o  pending-block-height-reqs.o
+            header-sync-req.o  tx-inv-broadcast-queue.o
+            tx-broadcast-cache.o  best-block.o  bh-index.o
+            best-filter-header.o  filter-headers.o  filters.o
+            block-headers.o
+            ~
+        ==
+      =.  pending-req-retry-interval.net-params.new  ~s20
+      cor(state [%1 new])
     ==
+  =?  cor  ?=(~ peer-sweep)  arm-peer-sweep
   =.  cor  connect-to-more-peers
   cor
 ::
