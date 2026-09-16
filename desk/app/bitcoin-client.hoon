@@ -87,39 +87,13 @@
       =filters
       =block-headers
   ==
-::  state-1: state-0 plus the peer-sweep slot -- when the sweep timer
-::  (+set-peer-sweep-timer) was last armed, so that +load on an upgrade
-::  does not arm a second one alongside the one already ticking.
-::
-+$  state-1
-  $:  =network:b-net
-      =protocol-version:b-net
-      =services:b-net
-      =net-params
-      =earth-peers
-      =earth-addresses
-      =blacklist
-      =pending-block-hash-reqs
-      =pending-block-height-reqs
-      =header-sync-req
-      =tx-inv-broadcast-queue
-      =tx-broadcast-cache
-      =best-block
-      =bh-index
-      =best-filter-header
-      =filter-headers
-      =filters
-      =block-headers
-      peer-sweep=(unit @da)
-  ==
 +$  state-n
   $%  [%0 state-0]
-      [%1 state-1]
   ==
 +$  card  card:agent:gall
 --
 ::
-=|  $>(%1 state-n)
+=|  $>(%0 state-n)
 =*  state  -
 =>
 ::
@@ -1035,17 +1009,19 @@
       timer
   %+  weld  /timer/peer-connect-timeout  (en-earth-peer-path erp)
 ::
-++  set-peer-sweep-timer
-  ^-  card
-  %.  peer-sweep-interval
-  %~  set
-      timer
-      /timer/peer-sweep
-::
 ++  arm-peer-sweep
+  ::  Idempotent without state.  Behn keeps a QUEUE of ducts per date,
+  ::  so two +loads (or a wake racing a load) would otherwise leave two
+  ::  sweep chains ticking forever.  Aim every arm at the same
+  ::  deterministic date -- the next minute boundary -- and %rest it
+  ::  before %wait-ing it: however many chains reach a boundary, each
+  ::  wake removes the one pending timer and re-adds one, so exactly one
+  ::  survives.  %rest of an absent timer is a no-op in behn.
+  ::
   ^+  cor
-  =.  peer-sweep  `(add now.bowl peer-sweep-interval)
-  (emit set-peer-sweep-timer)
+  =/  next=@da  (add now.bowl (sub peer-sweep-interval (mod now.bowl peer-sweep-interval)))
+  =.  cor  (emit [%pass /timer/peer-sweep %arvo %b %rest next])
+  (emit [%pass /timer/peer-sweep %arvo %b %wait next])
 ::
 ::  +counted-peers: the peers +connect-to-more-peers measures against
 ::  .target-peers -- live ones, plus connects still young enough to be
@@ -2351,28 +2327,16 @@
       ~&  >>>  [dap.bowl %load-state-reset]
       init
     ?-  -.u.old
-      %1  cor(state u.old)
-    ::  %0 -> %1: the peer-sweep slot (armed below), and a gentler block
-    ::  re-request interval -- a 2 MB block from a slow peer was asked of
-    ::  another peer every 5 s, and with no block cache each copy that
-    ::  arrived was deserialised again.
-    ::
-        %0
-      =/  o=state-0  +.u.old
-      =/  new=state-1
-        :*  network.o  protocol-version.o  services.o  net-params.o
-            earth-peers.o  earth-addresses.o  blacklist.o
-            pending-block-hash-reqs.o  pending-block-height-reqs.o
-            header-sync-req.o  tx-inv-broadcast-queue.o
-            tx-broadcast-cache.o  best-block.o  bh-index.o
-            best-filter-header.o  filter-headers.o  filters.o
-            block-headers.o
-            ~
-        ==
-      =.  pending-req-retry-interval.net-params.new  ~s20
-      cor(state [%1 new])
+      %0  cor(state u.old)
     ==
-  =?  cor  ?=(~ peer-sweep)  arm-peer-sweep
+  ::  a 2 MB block from a slow peer was asked of another peer every 5 s
+  ::  and, with no block cache, deserialised again on every copy that
+  ::  arrived.  A value in net-params, not a new field: the state shape
+  ::  is unchanged, so an OLDER agent handed this state still loads it
+  ::  (a shape change made a downgrade reset a live ship to genesis).
+  ::
+  =?  pending-req-retry-interval.net-params  =(~s5 pending-req-retry-interval.net-params)  ~s20
+  =.  cor  arm-peer-sweep
   =.  cor  connect-to-more-peers
   cor
 ::
