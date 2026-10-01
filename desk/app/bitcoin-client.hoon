@@ -557,7 +557,7 @@
     ?.  ?=([%behn %wake *] sin)  cor
     ?:  handshake-done.u.erd  cor
     %+  disconnect-peer
-        ['handshake timeout' ~^~d1]
+        ~  :: ['handshake timeout' ~^~d1]  :: TODO: this should ban, but the timer is currently armed early to catch local tcp-sidecar problems to clear stale peers
         erp
   ::
       [%timer %peer-ping earth-peer=*]
@@ -727,8 +727,7 @@
     ::
         %connected
       ~?  verb.config  [%tcp-connected erp]
-      %-  emil
-      :_  (set-peer-handshake-timeout-timer erp)^~
+      %-  emit
       %+  send:tcp  erp
       %-  ~(write ne:b-ser network)
       :~  make-version-message
@@ -1261,7 +1260,8 @@
     %-  make-earth-peer-info
         erd
   %-  emil
-  %-  open:tcp
+  :-  (set-peer-handshake-timeout-timer erp)  :: TODO: this should arm on confirmation of TCP connection,
+  %-  open:tcp                                :: but we arm it immediately to ensure potential stale peers are cleared as a result of local tcp-sidecar problems
       erp
 ::
 ++  connect-to-more-peers
