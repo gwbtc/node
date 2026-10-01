@@ -16,10 +16,10 @@
             disconnect-peer+earth-address
         ==
     ++  broadcast-transaction
-      |=  val=^json
+      |=  val=json
       (transaction-from-json val)
     ++  earth-address
-      |=  val=^json
+      |=  val=json
       =/  raw=[network-id=@t address=@t port=@ud]
         %.  val
         %-  ot
@@ -29,13 +29,13 @@
         ==
       =/  nid=network-address-id:b-net
         ?+  network-id.raw  !!
-            'ipv4'       %ipv4
-            'ipv6'       %ipv6
-            'torv2'      %torv2
-            'torv3'      %torv3
-            'i2p'        %i2p
-            'cjdns'      %cjdns
-            'yggdrasil'  %yggdrasil
+            %'ipv4'       %ipv4
+            %'ipv6'       %ipv6
+            %'torv2'      %torv2
+            %'torv3'      %torv3
+            %'i2p'        %i2p
+            %'cjdns'      %cjdns
+            %'yggdrasil'  %yggdrasil
         ==
       =/  add  (need (de:base16:mimes:html address.raw))
       ?>  =((network-address-width nid) p.add)
@@ -89,8 +89,8 @@
   |=  [wid=@ud jon=^json]
   ^-  @ux
   =/  val  (json-hex jon)
-  ?>  =(wid p.val)
-  q.val
+  ?>  =(wid wid.val)
+  dat.val
 ::
 ++  transaction-from-json
   |=  jon=^json

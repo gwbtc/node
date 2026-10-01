@@ -4,7 +4,7 @@
     b-ser=bitcoin-serialization,
     b-fil=bitcoin-compact-block-filters
 |%
-+$  net-params
++$  config
   $:  target-addresses=@ud
       target-peers=@ud
       target-priority-peers=@ud
@@ -19,6 +19,9 @@
       tx-inv-broadcast-retry-interval=@dr
       tx-broadcast-cache-expiration=@dr
       blacklist-cleanup-interval=@dr
+      filter-cache-max-size=@ud
+      block-cache-max-size=@ud
+      percent-of-cache-size-to-prune=@ud
   ==
 ::
 +$  earth-peers  (map earth-address earth-peer-state)
@@ -65,13 +68,15 @@
 ::
 +$  best-filter-header  [=block-height =block-hash]
 +$  filter-headers      (map block-hash filter-header:b-fil)
-+$  filters             (map block-hash filter:b-fil)
++$  filter-cache        [size=@ud dat=(map block-hash filter:b-fil)]
 ::
-+$  state-0
++$  block-cache         [size=@ud dat=(map block-hash hexb)]
+::
++$  state-1
   $:  =network:b-net
       =protocol-version:b-net
       =services:b-net
-      =net-params
+      =config
       =earth-peers
       =earth-addresses
       =earth-blacklist
@@ -84,16 +89,64 @@
       =bh-index
       =best-filter-header
       =filter-headers
-      =filters
+      =filter-cache
       =block-headers
+      =block-cache
   ==
+::
+++  state-0
+  =<  state
+  |%
+  +$  state
+    $:  =network:b-net
+        =protocol-version:b-net
+        =services:b-net
+        net-params=*
+        =earth-peers
+        =earth-addresses
+        =blacklist
+        =pending-block-hash-reqs
+        =pending-block-height-reqs
+        =header-sync-req
+        =tx-inv-broadcast-queue
+        =tx-broadcast-cache
+        =best-block
+        =bh-index
+        =best-filter-header
+        =filter-headers
+        =filters
+        =block-headers
+    ==
+  +$  earth-peers  (map earth-address earth-peer-state)
+  +$  earth-peer-state
+    $:  handshake-done=_|
+        wtxidrelay=_|
+        starting-height=block-height
+        =services:b-net
+        connection-opened=time
+        =last-heard
+        =ping-average
+        =outbound-ping
+        buffer=hexb
+    ==
+  +$  blacklist  (map earth-address time)
+  +$  earth-addresses  (map earth-address earth-address-info)
+  +$  earth-address-info
+    $:  =address-provenance
+        =last-heard
+        =services:b-net
+        =ping-average
+    ==
+  +$  filters  (map block-hash filter:b-fil)
+  --
 +$  state-n
-  $%  [%0 state-0]
+  $%  [%1 state-1]
+      [%0 state-0]
   ==
 +$  card  card:agent:gall
 --
 ::
-=|  $>(%0 state-n)
+=+  [%1 *state-1]
 =*  state  -
 =>
 ::
@@ -112,14 +165,14 @@
     ~&       [%network network]
     ~&       [%services services]
     ~&       [%protocol-version protocol-version]
-    ~&       [%net-params net-params]
+    ~&       [%config config]
     ~&  >    [%is-synced is-fully-synced]
     ~&  >    [%best-block best-block]
     ~&  >    [%bh-index ~(wyt in bh-index)]
     ~&  >    [%headers ~(wyt in block-headers)]
     ~&  >>   [%best-filter-header best-filter-header]
     ~&  >>   [%filter-headers ~(wyt in filter-headers)]
-    ~&  >>   [%filters ~(wyt in filters)]
+    ~&  >>   [%filter-cache ~(wyt in dat.filter-cache)]
     ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
     ~&  >>>  [%tx-inv-broadcast-queue (lent tx-inv-broadcast-queue)]
@@ -129,6 +182,8 @@
     ~&   >   [%total-earth-peers ~(wyt in earth-peers)]
     ~&   >   [%live-earth-peers (lent (skim ~(tap by earth-peers) |=([k=earth-address v=earth-peer-state] handshake-done.v)))]
     ~&  >>   [%priority-peers get-priority-peer-count]
+    ~&  >>>  [%filter-cache-size size.filter-cache]
+    ~&  >>>  [%block-cache-size size.block-cache]
     cor
   ::
   ?.  ?=(%bitcoin-client-action mak)  ~|(bad-poke/mak !!)
@@ -329,7 +384,7 @@
       %-  emil
       %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
           ~
-    =/  fil  (~(get by filters) haz)
+    =/  fil  (~(get by dat.filter-cache) haz)
     ?^  fil
       %-  emil
       %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
@@ -356,7 +411,7 @@
     ?:  (lte het block-height.best-block)
       =/  haz  (got:on-bh-index bh-index het)
       =/  hed  (~(got by block-headers) haz)
-      =/  fil  (~(get by filters) haz)
+      =/  fil  (~(get by dat.filter-cache) haz)
       ?^  fil
         %-  emil
         %-  ~(res ~(block-filter-by-height make-update ~^src.bowl) het)
@@ -541,7 +596,7 @@
       [%timer %pending-req %block %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.wir)
     :: TODO: make less janky
-    ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter])  cor
+    ?~  (~(del in (~(get ju pending-block-hash-reqs) haz)) [%block-filter ~])  cor
     =.  cor  (emit (set-pending-block-hash-req-timer haz [%block ~]))
     =/  som  (get-some-peer &)
     ?~  som  cor
@@ -569,7 +624,7 @@
     =/  het  (slav %ud block-height.wir)
     =/  haz  (got:on-bh-index bh-index het)
     :: TODO: make less janky
-    ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter])  cor
+    ?~  (~(del in (~(get ju pending-block-height-reqs) het)) [%block-filter ~])  cor
     =.  cor  (emit (set-pending-block-height-req-timer het [%block ~]))
     =/  som  (get-some-peer &)
     ?~  som  cor
@@ -950,7 +1005,7 @@
 ++  set-peer-handshake-timeout-timer
   |=  erp=earth-address
   ^-  card
-  %.  peer-handshake-timeout:net-params
+  %.  peer-handshake-timeout.config
   %~  set
       timer
   %+  weld  /timer/peer-handshake-timeout  (en-earth-peer-path erp)
@@ -958,21 +1013,21 @@
 ++  set-ping-timer
   |=  erp=earth-address
   ^-  card
-  %.  ping-interval:net-params
+  %.  ping-interval.config
   %~  set
       timer
   %+  weld  /timer/peer-ping  (en-earth-peer-path erp)
 ::
 ++  set-blacklist-cleanup-timer
   ^-  card
-  %.  blacklist-cleanup-interval:net-params
+  %.  blacklist-cleanup-interval.config
   %~  set
       timer
       /timer/blacklist-cleanup
 ::
 ++  set-tx-inv-broadcast-queue-timer
   ^-  card
-  %.  tx-inv-broadcast-retry-interval:net-params
+  %.  tx-inv-broadcast-retry-interval.config
   %~  set
       timer
       /timer/tx-inv-broadcast-queue
@@ -980,7 +1035,7 @@
 ++  set-tx-broadcast-cache-timer
   |=  tid=txid
   ^-  card
-  %.  tx-broadcast-cache-expiration:net-params
+  %.  tx-broadcast-cache-expiration.config
   %~  set
       timer
       /timer/tx-broadcast-cache/[(scot %ux tid)]
@@ -988,7 +1043,7 @@
 ++  set-pending-block-hash-req-timer
   |=  [haz=block-hash req=pending-block-hash-req]
   ^-  card
-  %.  pending-req-retry-interval:net-params
+  %.  pending-req-retry-interval.config
   %~  set
       timer
   ?+  -.req
@@ -1000,7 +1055,7 @@
 ++  set-pending-block-height-req-timer
   |=  [het=block-height req=pending-block-height-req]
   ^-  card
-  %.  pending-req-retry-interval:net-params
+  %.  pending-req-retry-interval.config
   %~  set
       timer
   ?+  -.req
@@ -1012,7 +1067,7 @@
 ++  set-header-sync-retry-timer
   |=  syc=^header-sync-req
   ^-  card
-  %.  header-sync-retry-interval:net-params
+  %.  header-sync-retry-interval.config
   %~  set
       timer
   %+  weld
@@ -1069,7 +1124,7 @@
 ++  peer-services-are-sufficient
   |=  ser=services:b-net
   ^-  ?
-  =*  req  required-peer-services.net-params
+  =*  req  required-peer-services.config
   ?&  ?:(node-network.req node-network.ser &)
       ?:(node-bloom.req node-bloom.ser &)
       ?:(node-witness.req node-witness.ser &)
@@ -1083,7 +1138,7 @@
   ^-  ?
   ?~  ping-average.erd  |
   =/  tim  (sub now.bowl connection-opened.erd)
-  ?:  (lth tim priority-peer-minimum-uptime:net-params)  |
+  ?:  (lth tim priority-peer-minimum-uptime.config)  |
   %+  lte
       u.ping-average.erd
       get-current-priority-peer-ping-threshold
@@ -1104,7 +1159,7 @@
         gth
   %+  max
       (div (mul med percent-of-median) 100)
-      priority-peer-base-ping-average:net-params
+      priority-peer-base-ping-average.config
 ::
 ++  get-priority-peer-count
   ^-  @ud
@@ -1126,9 +1181,9 @@
   ^-  (list earth-address)
   =/  priority-peer-count  get-priority-peer-count
   =/  num-priority-peers-needed
-    ?:  (gte priority-peer-count target-priority-peers.net-params)  0
+    ?:  (gte priority-peer-count target-priority-peers.config)  0
     %+  sub
-        target-priority-peers.net-params
+        target-priority-peers.config
         priority-peer-count
   =/  ads  (~(dif in ~(key by earth-addresses)) ~(key by earth-peers))
   =/  rng  ~(. og eny.bowl)
@@ -1212,7 +1267,7 @@
 ::
 ++  connect-to-more-peers
   ^+  cor
-  =*  target  target-peers.net-params
+  =*  target  target-peers.config
   =/  num-peers  ~(wyt in earth-peers)
   ?:  (gte num-peers target)  cor
   =/  ads  (get-n-new-addresses (sub target num-peers))
@@ -1475,7 +1530,7 @@
       ==
     =/  evict-old-address
       ?&  ?=(~ pre)
-          (gte len target-addresses:net-params)
+          (gte len target-addresses.config)
       ==
     ?:  &(evict-old-address ?=(~ replaceable-addrs))
       %=  $
@@ -1509,7 +1564,7 @@
     ==
   =.  cor  connect-to-more-peers
   =/  num-addrs  ~(wyt in earth-addresses)
-  ?:  (gte num-addrs target-addresses.net-params)  cor
+  ?:  (gte num-addrs target-addresses.config)  cor
   =/  som  (get-some-peer |)
   ?~  som  cor
   %-  emit
@@ -1534,7 +1589,7 @@
       %+  disconnect-peer
           ['redundant version message' ~^~d10]
           erp
-    ?:  (lth version.msg minimum-peer-protocol-version.net-params)
+    ?:  (lth version.msg minimum-peer-protocol-version.config)
       %+  disconnect-peer
           ['incompatible protocol version' ~^~d3]
           erp
@@ -1585,7 +1640,7 @@
       %-  ~(write ne:b-ser network)
       :+  [%verack ~]
           [%getheaders make-block-locator ~]
-      ?:  (gte ~(wyt in earth-addresses) target-addresses.net-params)  ~
+      ?:  (gte ~(wyt in earth-addresses) target-addresses.config)  ~
       :~  [%getaddr ~]
       ==
     %-  send-ping
@@ -1843,7 +1898,11 @@
           ['cfilter failed verification' ~^~d10]
           erp
     :: cache the block filter
-    =.  filters  (~(put by filters) haz fil)
+    =.  filter-cache
+      %_  filter-cache
+          size  (add size.filter-cache wid.fil)
+          dat   (~(put by dat.filter-cache) haz fil)
+      ==
     :: update any subscriptions pending this block filter
     =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
     =.  cor
@@ -2132,7 +2191,7 @@
             bh-index
             new-best-branch
       =.  best-block  new-best-block
-      =.  best-filter-header
+      =.  best-filter-header                                  :: TODO: on reorg, delete any cached filters (and blocks) from the stale branch
         =/  las  last-common-block
         |-
         =/  fed  (~(get by filter-headers) block-hash.las)
@@ -2296,6 +2355,30 @@
 ::
   ::
 ::
+++  init-config                                            :: TODO: find optimal default config values
+  %*  p
+      p=*^config
+      target-addresses                             500
+      target-peers                                 10
+      target-priority-peers                        5
+      minimum-peer-protocol-version                70.016
+      node-network.required-peer-services          &
+      node-witness.required-peer-services          &
+      node-compact-filters.required-peer-services  &
+      priority-peer-base-ping-average              (div ~s1 2)
+      priority-peer-minimum-uptime                 ~m1
+      peer-handshake-timeout                       ~s7
+      ping-interval                                ~m2
+      pending-req-retry-interval                   ~s5
+      header-sync-retry-interval                   ~s5
+      tx-inv-broadcast-retry-interval              ~s15
+      tx-broadcast-cache-expiration                ~s30
+      blacklist-cleanup-interval                   ~d1
+      filter-cache-max-size                        1.000.000.000
+      block-cache-max-size                         1.000.000.000
+      percent-of-cache-size-to-prune               25
+  ==
+::
 ++  init
   ^+  cor
   =.  cor  (emil set-explorer-ui)
@@ -2310,25 +2393,7 @@
   =*  haz  block-hash.val
   =*  het  block-height.val
   =*  wok  chainwork.val
-  =.  net-params
-    %_  net-params
-        target-addresses                             500
-        target-peers                                 10
-        target-priority-peers                        5
-        minimum-peer-protocol-version                70.016
-        node-network.required-peer-services          &
-        node-witness.required-peer-services          &
-        node-compact-filters.required-peer-services  &
-        priority-peer-base-ping-average              (div ~s1 2)  :: TODO: find best value
-        priority-peer-minimum-uptime                 ~m1
-        peer-handshake-timeout                       ~s7
-        ping-interval                                ~m2
-        pending-req-retry-interval                   ~s5
-        header-sync-retry-interval                   ~s5
-        tx-inv-broadcast-retry-interval              ~s15
-        tx-broadcast-cache-expiration                ~s30
-        blacklist-cleanup-interval                   ~d1
-    ==
+  =.  config  init-config
   =.  cor  (emit set-blacklist-cleanup-timer)
   %_  cor
       services       services(node-witness &)
@@ -2339,7 +2404,6 @@
   ::
       best-filter-header  [het haz]
       filter-headers      (~(put by filter-headers) haz genesis-filter-header:b-fil)
-      filters             (~(put by filters) haz genesis-filter:b-fil)
   ==
 ::
 ++  save
@@ -2349,16 +2413,80 @@
 ++  load
   |=  vaz=vase
   ^+  cor
-  =.  cor
-    =/  old  (mole |.(!<(state-n vaz)))
-    ?~  old
-      ~&  >>>  [dap.bowl %load-state-reset]
-      init
-    ?-  -.u.old
-      %0  cor(state u.old)
+  =.  state
+    =/  old  !<(state-n vaz)
+    ?-  -.old
+        %1  old
+        %0  (state-0-to-1 old)
     ==
   =.  cor  connect-to-more-peers
   cor
+::
+++  state-0-to-1
+  |=  [%0 old=state-0]
+  :-  %1
+  ^-  state-1
+  =/  new-earth-peers
+    ^-  ^earth-peers
+    %-  ~(urn by earth-peers.old)
+    |=  [erp=earth-address erd=earth-peer-state:state-0]
+    ^-  earth-peer-state
+    :*  got-version=handshake-done.erd
+        wtxidrelay.erd
+        handshake-done.erd
+        starting-height.erd
+        services.erd
+        connection-opened.erd
+        last-heard.erd
+        ping-average.erd
+        outbound-ping.erd
+        buffer.erd
+    ==
+  =/  new-earth-addresses
+    ^-  ^earth-addresses
+    %-  ~(urn by earth-addresses.old)
+    |=  [erp=earth-address ard=earth-address-info:state-0]
+    ^-  earth-address-info
+    =/  rank
+      ?:  ?=(%userspace -.address-provenance.ard)  %priority
+      ?-  ping-average.ard
+          ^  %known
+          ~  %unknown
+      ==
+    :*  address-provenance.ard
+        rank
+        last-heard.ard
+        services.ard
+    ==
+  =/  new-earth-blacklist
+    ^-  ^earth-blacklist
+    %-  ~(urn by blacklist.old)
+    |=  [erp=earth-address wen=time]
+    ^-  earth-blacklist-info
+    :*  wen
+        'N/A (migrated from state-0)'
+        [~ ~d3]
+    ==
+  :*  network.old
+      protocol-version.old
+      services.old
+      init-config
+      new-earth-peers
+      new-earth-addresses
+      new-earth-blacklist
+      pending-block-hash-reqs.old
+      pending-block-height-reqs.old
+      header-sync-req.old
+      tx-inv-broadcast-queue.old
+      tx-broadcast-cache.old
+      best-block.old
+      bh-index.old
+      best-filter-header.old
+      filter-headers.old
+      *^filter-cache
+      block-headers.old
+      *^block-cache
+  ==
 ::
 --
 ::
