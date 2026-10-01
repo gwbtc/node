@@ -5,7 +5,8 @@
     b-fil=bitcoin-compact-block-filters
 |%
 +$  config
-  $:  target-addresses=@ud
+  $:  verb=?
+      target-addresses=@ud
       target-peers=@ud
       target-priority-peers=@ud
       minimum-peer-protocol-version=@ud
@@ -662,7 +663,7 @@
             =(for for.u.header-sync-req)
         ==
         cor
-    ~&  %retrying-header-sync
+    ~?  verb.config  %retrying-header-sync
         continue-syncing-headers
   ::
       [%timer %blacklist-cleanup ~]
@@ -690,7 +691,7 @@
   ::
       [%explorer %file-update ~]
     ?.  ?=([%clay %writ *] sin)  cor
-    ~&  >>  'updating explorer ui'
+    ~?  verb.config  'updating explorer ui'
     =.  cor  (emil set-explorer-ui)
     =.  cor  (emit watch-explorer-ui-files)
     cor
@@ -710,13 +711,11 @@
     ?-  -.gif
     ::
         %receive
-      :: ~&  %tcp-receive
       =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
       =?  last-heard.erd  .?(mes)  ~^now.bowl
       =.  cor  (update-peer erp erd)
       |-
       ?~  mes  cor
-      :: ~&  -.i.mes
       =.  cor
         =+  (mole |.((handle-message erp i.mes)))
         ?~  -
@@ -727,7 +726,7 @@
       ==
     ::
         %connected
-      ~&  >  [%tcp-connected erp]
+      ~?  verb.config  [%tcp-connected erp]
       %-  emil
       :_  (set-peer-handshake-timeout-timer erp)^~
       %+  send:tcp  erp
@@ -736,13 +735,13 @@
       ==
     ::
         %closed
-      ~&  >>>  [%tcp-closed erp]
+      ~?  verb.config  [%tcp-closed erp]
       %+  disconnect-peer
           ~
           erp
     ::
         %error
-      ~&  >>>  [%tcp-error erp msg.gif]
+      ~?  verb.config  [%tcp-error erp msg.gif]
       %+  disconnect-peer
           [(cat 3 'tcp error: ' msg.gif) ~^~d3]
           erp
@@ -1242,7 +1241,7 @@
 ++  connect-to-peer
   |=  erp=earth-address
   ^+  cor
-  ~&  ['connecting to:' erp]
+  ~?  verb.config  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
   =/  ard  (~(got by earth-addresses) erp)
@@ -1380,7 +1379,7 @@
 ++  update-ping-average
   |=  [avg=ping-average new=@dr]
   ^-  ping-average
-  ~&  >  ['ping time' new]
+  ~?  verb.config  ['ping' new]
   :-  ~
   =/  old
     %+  fall
@@ -1580,7 +1579,7 @@
   ?+  -.msg  cor  :: TODO: add a case for all messages where the handshake is checked at a minimum
   ::
       %version
-    ~&  >  msg
+    ~?  verb.config  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['version message after handshake' ~^~d10]
@@ -1610,7 +1609,7 @@
     ==
   ::
       %wtxidrelay
-    ~&  >  msg
+    ~?  verb.config  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['wtxidrelay message after handshake' ~^~d10]
@@ -1623,7 +1622,7 @@
     %+  update-peer  erp  erd
   ::
       %verack
-    ~&  >  msg
+    ~?  verb.config  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['verack message after handshake' ~^~d10]
@@ -1677,7 +1676,7 @@
     ==
   ::
       %addr
-    ~&  >>  [%addr (lent addresses.msg)]
+    ~?  verb.config  [%addr (lent addresses.msg)]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['addr message before handshake' ~^~d10]
@@ -1698,7 +1697,7 @@
     ==
   ::
       %addrv2
-    ~&  >>  [%addrv2 (lent addresses.msg)]
+    ~?  verb.config  [%addrv2 (lent addresses.msg)]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['addrv2 message before handshake' ~^~d10]
@@ -1712,7 +1711,7 @@
         addresses.msg
   ::
       %inv
-    ~&  %inv
+    ~?  verb.config  %inv
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['inv message before handshake' ~^~d10]
@@ -1764,7 +1763,7 @@
     =*  wok  chainwork.hed
     =/  mer  (make-merkle-root:b-val +.bok)
     ?.  =(mer merkle-root.block-header.hed)
-      ~&  >>>  %block-merkle-root-verification-fail
+      ~?  verb.config  %block-merkle-root-verification-fail
       %+  disconnect-peer
           ['block failed merkle root verification' ~^~d10]
           erp
@@ -1893,7 +1892,7 @@
       %-  make-filter-hash:b-fil
           fil
     ?.  =(fed this-filter-header)
-      ~&  >>>  %block-filter-verification-fail
+      ~?  verb.config  %block-filter-verification-fail
       %+  disconnect-peer
           ['cfilter failed verification' ~^~d10]
           erp
@@ -1957,7 +1956,7 @@
     cor
   ::
       %cfheaders
-    ~&  >>  [%filter-headers-from erp]
+    ~?  verb.config  [%filter-headers-from erp]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['cfheaders message before handshake' ~^~d10]
@@ -2022,7 +2021,7 @@
     ==
   ::
       %headers
-    ~&  >>  [%headers-from erp]
+    ~?  verb.config  [%headers-from erp]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['headers message before handshake' ~^~d10]
@@ -2054,14 +2053,14 @@
     ::
         %redundant
       ?.  .?(t.headers.msg)
-        ~&  %redundant-headers
+        ~?  verb.config  %redundant-headers
         cor
       %=  $
           headers.msg  t.headers.msg
       ==
     ::
         %orphan
-      ~&  [%orphan-block-header block-hash.val hed]
+      ~?  verb.config  [%orphan-block-header block-hash.val hed]
       :: TODO: save orphan headers per peer while unsynced and then process them when synced becomes true
       ?.  is-fully-synced  cor
       %-  emit
@@ -2071,7 +2070,7 @@
       ==
     ::
         %invalid
-      ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
+      ~?  verb.config  [%invalid-block-header block-hash.val validation-checks.val hed]
       %+  disconnect-peer
           ['invalid block header' ~^~d10]
           erp
@@ -2358,6 +2357,7 @@
 ++  init-config                                            :: TODO: find optimal default config values
   %*  p
       p=*^config
+      verb                                         |
       target-addresses                             500
       target-peers                                 10
       target-priority-peers                        5
