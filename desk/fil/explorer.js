@@ -1912,7 +1912,7 @@ function PeerCard(peer) {
       PeerDetailField(
         peerRenderKey,
         'ping-average',
-        'Ping average',
+        'Ping',
         formatPingAverage(pingAverage)
       )
     ]),
