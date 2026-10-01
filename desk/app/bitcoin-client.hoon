@@ -102,6 +102,8 @@
 ++  abet  :-  (flop cards)  state
 ++  emit  |=  =card  cor(cards [card cards])
 ++  emil  |=  caz=(list card)  cor(cards (welp (flop caz) cards))
+::  debug traces (per peer / message / retry); flip to & to diagnose
+++  dbg  ^-(? |)
 ::
 ++  poke
   |=  [mak=mark vaz=vase]
@@ -153,7 +155,7 @@
     ?.  ?|  ?=(%ipv4 net-id.erp)
             ?=(%ipv6 net-id.erp)
         ==
-      ~&  >>>  [%need-ipv4-or-ipv6 erp]
+      ~|  [%need-ipv4-or-ipv6 erp]
       !!
     =?  cor  !(~(has by earth-addresses) erp)
       =/  ard
@@ -171,7 +173,7 @@
           erp
           ard
     ?:  (~(has by earth-peers) erp)
-      ~&  >>  [%already-connected erp]
+      ~?  dbg  [%already-connected erp]
       cor
     %-  connect-to-peer
         erp
@@ -607,7 +609,7 @@
             =(for for.u.header-sync-req)
         ==
         cor
-    ~&  %retrying-header-sync
+    ~?  dbg  %retrying-header-sync
         continue-syncing-headers
   ::
       [%timer %blacklist-cleanup ~]
@@ -635,7 +637,7 @@
   ::
       [%explorer %file-update ~]
     ?.  ?=([%clay %writ *] sin)  cor
-    ~&  >>  'updating explorer ui'
+    ~?  dbg  'updating explorer ui'
     =.  cor  (emil set-explorer-ui)
     =.  cor  (emit watch-explorer-ui-files)
     cor
@@ -672,7 +674,7 @@
       ==
     ::
         %connected
-      ~&  >  [%tcp-connected erp]
+      ~?  dbg  [%tcp-connected erp]
       %-  emil
       :_  (set-peer-handshake-timeout-timer erp)^~
       %+  send:tcp  erp
@@ -681,13 +683,13 @@
       ==
     ::
         %closed
-      ~&  >>>  [%tcp-closed erp]
+      ~?  dbg  [%tcp-closed erp]
       %+  disconnect-peer
           ~
           erp
     ::
         %error
-      ~&  >>>  [%tcp-error erp msg.gif]
+      ~?  dbg  [%tcp-error erp msg.gif]
       %+  disconnect-peer
           [(cat 3 'tcp error: ' msg.gif) ~^~d3]
           erp
@@ -1187,7 +1189,7 @@
 ++  connect-to-peer
   |=  erp=earth-address
   ^+  cor
-  ~&  ['connecting to:' erp]
+  ~?  dbg  ['connecting to:' erp]
   ?<  (~(has by earth-peers) erp)
   ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
   =/  ard  (~(got by earth-addresses) erp)
@@ -1325,7 +1327,7 @@
 ++  update-ping-average
   |=  [avg=ping-average new=@dr]
   ^-  ping-average
-  ~&  >  ['ping time' new]
+  ~?  dbg  ['ping time' new]
   :-  ~
   =/  old
     %+  fall
@@ -1525,7 +1527,7 @@
   ?+  -.msg  cor  :: TODO: add a case for all messages where the handshake is checked at a minimum
   ::
       %version
-    ~&  >  msg
+    ~?  dbg  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['version message after handshake' ~^~d10]
@@ -1555,7 +1557,7 @@
     ==
   ::
       %wtxidrelay
-    ~&  >  msg
+    ~?  dbg  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['wtxidrelay message after handshake' ~^~d10]
@@ -1568,7 +1570,7 @@
     %+  update-peer  erp  erd
   ::
       %verack
-    ~&  >  msg
+    ~?  dbg  msg
     ?:  handshake-done.erd
       %+  disconnect-peer
           ['verack message after handshake' ~^~d10]
@@ -1622,7 +1624,7 @@
     ==
   ::
       %addr
-    ~&  >>  [%addr (lent addresses.msg)]
+    ~?  dbg  [%addr (lent addresses.msg)]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['addr message before handshake' ~^~d10]
@@ -1643,7 +1645,7 @@
     ==
   ::
       %addrv2
-    ~&  >>  [%addrv2 (lent addresses.msg)]
+    ~?  dbg  [%addrv2 (lent addresses.msg)]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['addrv2 message before handshake' ~^~d10]
@@ -1657,7 +1659,7 @@
         addresses.msg
   ::
       %inv
-    ~&  %inv
+    ~?  dbg  %inv
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['inv message before handshake' ~^~d10]
@@ -1709,7 +1711,7 @@
     =*  wok  chainwork.hed
     =/  mer  (make-merkle-root:b-val +.bok)
     ?.  =(mer merkle-root.block-header.hed)
-      ~&  >>>  %block-merkle-root-verification-fail
+      ~?  dbg  %block-merkle-root-verification-fail
       %+  disconnect-peer
           ['block failed merkle root verification' ~^~d10]
           erp
@@ -1838,7 +1840,7 @@
       %-  make-filter-hash:b-fil
           fil
     ?.  =(fed this-filter-header)
-      ~&  >>>  %block-filter-verification-fail
+      ~?  dbg  %block-filter-verification-fail
       %+  disconnect-peer
           ['cfilter failed verification' ~^~d10]
           erp
@@ -1898,7 +1900,7 @@
     cor
   ::
       %cfheaders
-    ~&  >>  [%filter-headers-from erp]
+    ~?  dbg  [%filter-headers-from erp]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['cfheaders message before handshake' ~^~d10]
@@ -1963,7 +1965,7 @@
     ==
   ::
       %headers
-    ~&  >>  [%headers-from erp]
+    ~?  dbg  [%headers-from erp]
     ?.  handshake-done.erd
       %+  disconnect-peer
           ['headers message before handshake' ~^~d10]
@@ -1995,14 +1997,14 @@
     ::
         %redundant
       ?.  .?(t.headers.msg)
-        ~&  %redundant-headers
+        ~?  dbg  %redundant-headers
         cor
       %=  $
           headers.msg  t.headers.msg
       ==
     ::
         %orphan
-      ~&  [%orphan-block-header block-hash.val hed]
+      ~?  dbg  [%orphan-block-header block-hash.val hed]
       :: TODO: save orphan headers per peer while unsynced and then process them when synced becomes true
       ?.  is-fully-synced  cor
       %-  emit
@@ -2012,7 +2014,7 @@
       ==
     ::
         %invalid
-      ~&  [%invalid-block-header block-hash.val validation-checks.val hed]
+      ~?  dbg  [%invalid-block-header block-hash.val validation-checks.val hed]
       %+  disconnect-peer
           ['invalid block header' ~^~d10]
           erp
@@ -2352,7 +2354,7 @@
   =.  cor
     =/  old  (mole |.(!<(state-n vaz)))
     ?~  old
-      ~&  >>>  [dap.bowl %load-state-reset]
+      ~>  %slog.[2 leaf+"%bitcoin-client: saved state did not load, reset to genesis and resyncing; report it if this repeats on every restart"]
       init
     ?-  -.u.old
       %0  cor(state u.old)
