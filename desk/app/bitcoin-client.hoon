@@ -187,6 +187,15 @@
     ~&  >>>  [%block-cache-size size.block-cache]
     cor
   ::
+  ?:  ?=(%bitcoin-client-connect-peer mak)          :: TODO: remove this once the boot script no longer needs it
+    =/  erp  !<(earth-address vaz)
+    %+  poke
+        %bitcoin-client-action
+    !>
+    ^-  bitcoin-client-action
+    :-  %connect-peer
+        erp
+  ::
   ?.  ?=(%bitcoin-client-action mak)  ~|(bad-poke/mak !!)
   =/  act  !<(bitcoin-client-action vaz)
   ?-  -.act
