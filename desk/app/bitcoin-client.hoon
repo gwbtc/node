@@ -704,6 +704,13 @@
   ?+  wir  cor
   ::
       [%tcp earth-peer=*]
+    ?:  ?=(%kick -.sin)
+      =/  erp  (de-earth-peer-path earth-peer.wir)
+      =/  erd  (~(got by earth-peers) erp)
+      ~?  verb.config  [%tcp-kick erp]
+      %+  disconnect-peer
+          ~
+          erp
     ?.  ?=(%fact -.sin)  cor
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(got by earth-peers) erp)
