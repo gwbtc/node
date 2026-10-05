@@ -757,6 +757,7 @@
     ::
         %error
       ~?  verb.config  [%tcp-error erp msg.gif]
+      ?:  =('sidecar disconnected' msg.gif)  (disconnect-peer ~ erp)  :: TODO: remove this once tcp sidecar issues are resolved
       %+  disconnect-peer
           [(cat 3 'tcp error: ' msg.gif) ~^~d3]
           erp
