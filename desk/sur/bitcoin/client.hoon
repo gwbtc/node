@@ -6,6 +6,7 @@
   $%  [%broadcast-transaction p=broadcast-transaction:action]
       [%connect-peer p=connect-peer:action]
       [%disconnect-peer p=disconnect-peer:action]
+      [%configure p=configure:action]
   ==
 ::
 +$  bitcoin-client-update
@@ -29,8 +30,18 @@
   +$  broadcast-transaction  transaction
   +$  connect-peer           earth-address
   +$  disconnect-peer        earth-address
+  +$  configure              (list config-item)
   ::
   --
+::
++$  config-item
+  $%  [%verb p=?]
+      [%target-addresses p=@ud]
+      [%target-peers p=@ud]
+      [%target-priority-peers p=@ud]
+      ::[%filter-cache-max-size p=@ud]
+      ::[%block-cache-max-size p=@ud]
+  ==
 ::
 ++  update
   |%

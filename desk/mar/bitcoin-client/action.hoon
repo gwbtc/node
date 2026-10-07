@@ -14,6 +14,7 @@
         :~  broadcast-transaction+broadcast-transaction
             connect-peer+earth-address
             disconnect-peer+earth-address
+            configure+configure
         ==
     ++  broadcast-transaction
       |=  val=json
@@ -40,6 +41,20 @@
       =/  add  (need (de:base16:mimes:html address.raw))
       ?>  =((network-address-width nid) p.add)
       [nid q.add port.raw]
+    ++  configure
+      |=  val=json
+      ^-  configure:action
+      %+  turn
+          (json-array val)
+      |=  item=json
+      ^-  config-item
+      %.  item
+      %-  of
+      :~  verb+bo
+          target-addresses+ni
+          target-peers+ni
+          target-priority-peers+ni
+      ==
     --
   --
 ++  grow

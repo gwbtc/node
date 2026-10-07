@@ -247,6 +247,26 @@
         ~
         erp
   ::
+      %configure
+    |-
+    ?~  p.act  cor
+    =*  fig  i.p.act
+    =.  cor
+      ?-  -.fig
+      ::
+          %verb                   cor(verb.config p.fig)
+          %target-addresses       cor(target-addresses.config p.fig)
+          %target-peers           cor(target-peers.config p.fig)
+          %target-priority-peers  cor(target-priority-peers.config p.fig)
+      ::
+      ::    %filter-cache-max-size
+      ::    %block-cache-max-size
+      ::
+      ==
+    %=  $
+        p.act  t.p.act
+    ==
+  ::
   ==
 ::
 ++  peek
