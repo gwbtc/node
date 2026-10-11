@@ -73,18 +73,16 @@
     ?~  previous
       :-  %orphan
           this-hash
-    =*  pre  u.previous
-    =/  het  +(block-height.pre)
-    |^
-    =/  prev-hash           (make-block-hash:b-ser block-header.pre)
+    =*  pre                 u.previous
+    =/  het                 +(block-height.pre)
     =/  block-time          (from-unix:chrono:userlib time.hed)
-    =/  median-time-past    get-median-time-past
+    =/  median-time-past    (get-median-time-past het hed)
     =/  target              (de-compact-target:b-ser bits.hed)
-    =/  next-work-required  get-next-work-required
+    =/  next-work-required  (get-next-work-required block-header.pre het hed)
     =/  val
       %*  p
           p=*validation-checks
-          valid-prev-hash         =(prev-hash previous-block-hash.hed)
+          valid-prev-hash         &
           valid-work-required     =(bits.hed next-work-required)
           valid-time-lower-bound  (gth block-time median-time-past)
           valid-time-upper-bound  (lte block-time (add now max-future-block-time))
@@ -103,56 +101,66 @@
     :+  %invalid
         this-hash
         val
-    ::
-    ++  get-median-time-past
-      ^-  @da
-      =/  lis
-        =/  num  past-median-timespan
-        |-
-        ^-  (list @ud)
-        ?:  =(0 num)  ~
-        ?:  =(0 het)  ~
-        =:  num  (dec num)
-            het  (dec het)
-            hed  block-header:(~(got by hes) previous-block-hash.hed)
-          ==
-        :-  time.hed
-            $
-      %-  from-unix:chrono:userlib
-      %+  snag
-          (div (lent lis) 2)
-          (sort lis lth)
-    ::
-    ++  get-next-work-required
-      ^-  @ux
-      ?:  =(net %regtest)  bits.block-header.pre
-      ?.  =(0 (mod het difficulty-adjustment-interval))  bits.block-header.pre
-      =/  epoch-first
-        ^-  block-header
-        =/  num  difficulty-adjustment-interval
-        |-
-        ?:  =(0 num)  hed
-        ?:  =(0 het)  hed
-        %=  $
-            num  (dec num)
-            het  (dec het)
-            hed  block-header:(~(got by hes) previous-block-hash.hed)
+  ::
+  ++  get-median-time-past
+    |=  [het=block-height hed=block-header]
+    ^-  @da
+    =,  params
+    =/  lis
+      =/  num  past-median-timespan
+      |-
+      ^-  (list @ud)
+      ?:  =(0 num)  ~
+      ?:  =(0 het)  ~
+      =:  num  (dec num)
+          het  (dec het)
+          hed  block-header:(~(got by hes) previous-block-hash.hed)
         ==
-      =/  actual-timespan
-        %+  sub
-        %-  from-unix:chrono:userlib  time.block-header.pre
-        %-  from-unix:chrono:userlib  time.epoch-first
-      =.  actual-timespan  (max actual-timespan (div pow-target-timespan 4))
-      =.  actual-timespan  (min actual-timespan (mul pow-target-timespan 4))
-      =/  previous-target  (de-compact-target:b-ser bits.block-header.pre)
-      =/  next-target
-        %+  min
-            pow-limit
-            (div (mul previous-target actual-timespan) pow-target-timespan)
-      %-  en-compact-target:b-ser
-          next-target
-    ::
-    --
+      :-  time.hed
+          $
+    %-  from-unix:chrono:userlib
+    %+  snag
+        (div (lent lis) 2)
+        (sort lis lth)
+  ::
+  ++  should-adjust-difficulty
+    |=  het=block-height
+    ^-  ?
+    .=  0
+    %+  mod
+        het
+        difficulty-adjustment-interval:params
+  ::
+  ++  get-next-work-required
+    |=  [pre=block-header het=block-height hed=block-header]
+    ^-  @ux
+    =,  params
+    ?:  =(net %regtest)  bits.pre
+    ?.  (should-adjust-difficulty het)  bits.pre
+    =/  epoch-first
+      ^-  block-header
+      =/  num  difficulty-adjustment-interval
+      |-
+      ?:  =(0 num)  hed
+      ?:  =(0 het)  hed
+      %=  $
+          num  (dec num)
+          het  (dec het)
+          hed  block-header:(~(got by hes) previous-block-hash.hed)
+      ==
+    =/  actual-timespan
+      %+  sub
+      %-  from-unix:chrono:userlib  time.pre
+      %-  from-unix:chrono:userlib  time.epoch-first
+    =.  actual-timespan  (max actual-timespan (div pow-target-timespan 4))
+    =.  actual-timespan  (min actual-timespan (mul pow-target-timespan 4))
+    =/  previous-target  (de-compact-target:b-ser bits.pre)
+    =/  next-target
+      %+  min
+          pow-limit
+          (div (mul previous-target actual-timespan) pow-target-timespan)
+    %-  en-compact-target:b-ser
+        next-target
   ::
   ++  validate-genesis-block-header
     |=  hed=block-header
