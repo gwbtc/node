@@ -14,6 +14,8 @@
         :~  broadcast-transaction+broadcast-transaction
             connect-peer+earth-address
             disconnect-peer+earth-address
+            ban-peer+ban-peer
+            unban-peer+earth-address
             add-address+earth-address
             del-address+earth-address
             configure+configure
@@ -43,6 +45,21 @@
       =/  add  (need (de:base16:mimes:html address.raw))
       ?>  =((network-address-width nid) p.add)
       [nid q.add port.raw]
+    ++  ban-peer
+      |=  val=json
+      ^-  ban-peer:action
+      %.  val
+      %-  ot
+      :~  earth-address+earth-address
+          reason+so
+          expiration+ban-expiration
+      ==
+    ++  ban-expiration
+      |=  val=json
+      ^-  (unit @dr)
+      ?~  val  ~
+      :: expiration is a duration in milliseconds, as in blacklist updates
+      [~ (mul (ni val) (div ~s1 1.000))]
     ++  configure
       |=  val=json
       ^-  configure:action

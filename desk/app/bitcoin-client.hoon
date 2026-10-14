@@ -246,6 +246,29 @@
         ~
         erp
   ::
+      %ban-peer
+    =*  erp  earth-address.p.act
+    =/  ban  [reason.p.act expiration.p.act]
+    ?:  (~(has by earth-peers) erp)
+      %+  disconnect-peer
+          ban
+          erp
+    %+  blacklist-address
+        erp
+        ban
+  ::
+      %unban-peer
+    =*  erp  p.act
+    ?.  (~(has by earth-blacklist) erp)  cor
+    =.  earth-blacklist  (~(del by earth-blacklist) erp)
+    =.  cor
+      %-  emit
+      %-  ~(blacklist make-update ~)
+      :-  %del
+          erp
+    %-  add-address-from-userspace
+        erp
+  ::
       %add-address
     =*  erp  p.act
     %-  add-address-from-userspace
