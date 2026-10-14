@@ -46,9 +46,9 @@
       ^-  configure:action
       %+  turn
           (json-array val)
-      |=  item=json
-      ^-  config-item
-      %.  item
+      |=  fig=json
+      ^-  config-action
+      %.  fig
       %-  of
       :~  verb+bo
           target-addresses+ni

@@ -4,27 +4,6 @@
     b-ser=bitcoin-serialization,
     b-fil=bitcoin-compact-block-filters
 |%
-+$  config
-  $:  verb=?
-      target-addresses=@ud
-      target-peers=@ud
-      target-priority-peers=@ud
-      minimum-peer-protocol-version=@ud
-      required-peer-services=services:b-net
-      priority-peer-base-ping-average=@dr
-      priority-peer-minimum-uptime=@dr
-      peer-handshake-timeout=@dr
-      ping-interval=@dr
-      pending-req-retry-interval=@dr
-      header-sync-retry-interval=@dr
-      tx-inv-broadcast-retry-interval=@dr
-      tx-broadcast-cache-expiration=@dr
-      blacklist-cleanup-interval=@dr
-      filter-cache-max-size=@ud
-      block-cache-max-size=@ud
-      percent-of-cache-size-to-prune=@ud
-  ==
-::
 +$  earth-peers  (map earth-address earth-peer-state)
 +$  earth-peer-state
   $:  got-version=_|
@@ -282,20 +261,21 @@
         erp
   ::
       %configure
+    =/  old-config  config
     |-
-    ?~  p.act  cor
+    ?~  p.act
+      ?:  =(old-config config)  cor
+      %-  emit
+      %~  config
+          make-update
+          ~
     =*  fig  i.p.act
     =.  cor
       ?-  -.fig
-      ::
           %verb                   cor(verb.config p.fig)
           %target-addresses       cor(target-addresses.config p.fig)
           %target-peers           cor(target-peers.config p.fig)
           %target-priority-peers  cor(target-priority-peers.config p.fig)
-      ::
-      ::    %filter-cache-max-size
-      ::    %block-cache-max-size
-      ::
       ==
     %=  $
         p.act  t.p.act
@@ -308,6 +288,14 @@
   ^-  (unit (unit cage))
   ?>  =(src.bowl our.bowl)
   ?+  poe  ~
+  ::
+      [%x %config ~]
+    :+  ~  ~
+    :-  %bitcoin-client-update
+    !>
+    ^-  bitcoin-client-update
+    :-  %config
+        config
   ::
       [%x %network ~]
     :+  ~  ~
@@ -423,6 +411,10 @@
   ^+  cor
   ?>  =(src.bowl our.bowl)
   ?+  poe  !!
+  ::
+      [%config ~]
+    %-  emit
+    %~  config  make-update  ~^src.bowl
   ::
       [%is-synced ~]
     %-  emit
@@ -987,6 +979,11 @@
 ::
 ++  make-update
   |_  for=(unit ship)
+  ::
+  ++  config
+    ^-  card
+    =/  dat  `config:update`^config
+    %+  fact  /config  [%config dat]
   ::
   ++  is-synced
     ^-  card

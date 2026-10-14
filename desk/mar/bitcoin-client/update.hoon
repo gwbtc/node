@@ -12,6 +12,8 @@
   ++  json
     ^-  ^json
     ?-  -.upd
+        %config
+      (tagged 'config' (config-json p.upd))
         %is-synced
       (tagged 'is-synced' [%b p.upd])
         %best-block
@@ -77,6 +79,30 @@
   |=  dur=@dr
   ^-  @ud
   (div dur (div ~s1 1.000))
+::
+++  config-json
+  |=  fig=config:update
+  ^-  ^json
+  %-  object
+  :~  ['verb' [%b verb.fig]]
+      ['target-addresses' (decimal target-addresses.fig)]
+      ['target-peers' (decimal target-peers.fig)]
+      ['target-priority-peers' (decimal target-priority-peers.fig)]
+      ['minimum-peer-protocol-version' (decimal minimum-peer-protocol-version.fig)]
+      ['required-peer-services' (services-json required-peer-services.fig)]
+      ['priority-peer-base-ping-average' (decimal (en-earth-duration-milliseconds priority-peer-base-ping-average.fig))]
+      ['priority-peer-minimum-uptime' (decimal (en-earth-duration-milliseconds priority-peer-minimum-uptime.fig))]
+      ['peer-handshake-timeout' (decimal (en-earth-duration-milliseconds peer-handshake-timeout.fig))]
+      ['ping-interval' (decimal (en-earth-duration-milliseconds ping-interval.fig))]
+      ['pending-req-retry-interval' (decimal (en-earth-duration-milliseconds pending-req-retry-interval.fig))]
+      ['header-sync-retry-interval' (decimal (en-earth-duration-milliseconds header-sync-retry-interval.fig))]
+      ['tx-inv-broadcast-retry-interval' (decimal (en-earth-duration-milliseconds tx-inv-broadcast-retry-interval.fig))]
+      ['tx-broadcast-cache-expiration' (decimal (en-earth-duration-milliseconds tx-broadcast-cache-expiration.fig))]
+      ['blacklist-cleanup-interval' (decimal (en-earth-duration-milliseconds blacklist-cleanup-interval.fig))]
+      ['filter-cache-max-size' (decimal filter-cache-max-size.fig)]
+      ['block-cache-max-size' (decimal block-cache-max-size.fig)]
+      ['percent-of-cache-size-to-prune' (decimal percent-of-cache-size-to-prune.fig)]
+  ==
 ::
 ++  best-block-json
   |=  bes=best-block:update

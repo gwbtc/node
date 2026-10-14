@@ -2,6 +2,27 @@
     b-net=bitcoin-network
 |%
 ::
++$  config
+  $:  verb=?
+      target-addresses=@ud
+      target-peers=@ud
+      target-priority-peers=@ud
+      minimum-peer-protocol-version=@ud
+      required-peer-services=services:b-net
+      priority-peer-base-ping-average=@dr
+      priority-peer-minimum-uptime=@dr
+      peer-handshake-timeout=@dr
+      ping-interval=@dr
+      pending-req-retry-interval=@dr
+      header-sync-retry-interval=@dr
+      tx-inv-broadcast-retry-interval=@dr
+      tx-broadcast-cache-expiration=@dr
+      blacklist-cleanup-interval=@dr
+      filter-cache-max-size=@ud
+      block-cache-max-size=@ud
+      percent-of-cache-size-to-prune=@ud
+  ==
+::
 +$  bitcoin-client-action
   $%  [%broadcast-transaction p=broadcast-transaction:action]
       [%connect-peer p=connect-peer:action]
@@ -25,6 +46,7 @@
       [%peers p=peers:update]
       [%addresses p=addresses:update]
       [%blacklist p=blacklist:update]
+      [%config p=config:update]
   ==
 ::
 ++  action
@@ -33,21 +55,20 @@
   +$  broadcast-transaction  transaction
   +$  connect-peer           earth-address
   +$  disconnect-peer        earth-address
-  +$  configure              (list config-item)
+  +$  configure              (list config-action)
   ::
   --
 ::
-+$  config-item
++$  config-action
   $%  [%verb p=?]
       [%target-addresses p=@ud]
       [%target-peers p=@ud]
       [%target-priority-peers p=@ud]
-      ::[%filter-cache-max-size p=@ud]
-      ::[%block-cache-max-size p=@ud]
   ==
 ::
 ++  update
   |%
+  +$  config  ^config
   ::
   +$  is-synced  ?
   ::
