@@ -233,21 +233,7 @@
         ==
       ~&  >>>  [%need-ipv4-or-ipv6 erp]
       !!
-    =?  cor  !(~(has by earth-addresses) erp)
-      =/  ard
-        %*  p
-            p=*earth-address-info
-            address-provenance  [%userspace ~]
-        ==
-      =.  earth-addresses
-        %+  ~(put by earth-addresses)
-            erp
-            ard
-      %-  emit
-      %-  ~(addresses make-update ~)
-      :+  %put
-          erp
-          ard
+    =.  cor  (add-address-from-userspace erp)
     ?:  (~(has by earth-peers) erp)
       ~&  >>  [%already-connected erp]
       cor
@@ -258,6 +244,20 @@
     =*  erp  p.act
     %+  disconnect-peer
         ~
+        erp
+  ::
+      %add-address
+    =*  erp  p.act
+    %-  add-address-from-userspace
+        erp
+  ::
+      %del-address
+    =*  erp  p.act
+    =?  cor  (~(has by earth-peers) erp)
+      %+  disconnect-peer
+          ~
+          erp
+    %-  del-address
         erp
   ::
       %configure
@@ -1479,16 +1479,21 @@
   %-  emit
   %~  is-synced  make-update  ~
 ::
+++  del-address
+  |=  erp=earth-address
+  ^+  cor
+  ?.  (~(has by earth-addresses) erp)  cor
+  =.  earth-addresses  (~(del by earth-addresses) erp)
+  %-  emit
+  %-  ~(addresses make-update ~)
+  :-  %del
+      erp
+::
 ++  blacklist-address
   |=  [erp=earth-address reason=@t expiration=(unit @dr)]
   ^+  cor
   ?:  (~(has by earth-blacklist) erp)  cor
-  =?  cor  (~(has by earth-addresses) erp)
-    =.  earth-addresses  (~(del by earth-addresses) erp)
-    %-  emit
-    %-  ~(addresses make-update ~)
-    :-  %del
-        erp
+  =.  cor  (del-address erp)
   =/  ban  [now.bowl reason expiration]
   =.  earth-blacklist  (~(put by earth-blacklist) erp ban)
   %-  emit
@@ -1620,6 +1625,25 @@
   :~  [%inv inv ~]
   ==
 ::
+++  add-address-from-userspace
+  |=  erp=earth-address
+  ^+  cor
+  ?:  (~(has by earth-addresses) erp)  cor
+  =/  ard
+    %*  p
+        p=*earth-address-info
+        address-provenance  [%userspace ~]
+    ==
+  =.  earth-addresses
+    %+  ~(put by earth-addresses)
+        erp
+        ard
+  %-  emit
+  %-  ~(addresses make-update ~)
+  :+  %put
+      erp
+      ard
+::
 ++  handle-addrv2
   |=  [erp=earth-address ads=(list address-v2:b-net)]
   ^+  cor
@@ -1685,12 +1709,7 @@
       ==
     =?  cor  evict-old-address
       ?~  replaceable-addrs  cor
-      =.  earth-addresses
-        %-  ~(del by earth-addresses)
-            p.i.replaceable-addrs
-      %-  emit
-      %-  ~(addresses make-update ~)
-      :-  %del
+      %-  del-address
           p.i.replaceable-addrs
     =?  replaceable-addrs  evict-old-address
       ?~  replaceable-addrs  ~

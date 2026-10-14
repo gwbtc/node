@@ -14,6 +14,8 @@
         :~  broadcast-transaction+broadcast-transaction
             connect-peer+earth-address
             disconnect-peer+earth-address
+            add-address+earth-address
+            del-address+earth-address
             configure+configure
         ==
     ++  broadcast-transaction

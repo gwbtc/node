@@ -27,6 +27,8 @@
   $%  [%broadcast-transaction p=broadcast-transaction:action]
       [%connect-peer p=connect-peer:action]
       [%disconnect-peer p=disconnect-peer:action]
+      [%add-address p=add-address:action]
+      [%del-address p=del-address:action]
       [%configure p=configure:action]
   ==
 ::
@@ -55,6 +57,8 @@
   +$  broadcast-transaction  transaction
   +$  connect-peer           earth-address
   +$  disconnect-peer        earth-address
+  +$  add-address            earth-address
+  +$  del-address            earth-address
   +$  configure              (list config-action)
   ::
   --
