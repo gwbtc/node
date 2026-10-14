@@ -12,8 +12,11 @@
 +$  bitcoin-client-update
   $%  [%is-synced p=is-synced:update]
       [%best-block p=best-block:update]
+      [%best-filter-header p=best-filter-header:update]
       [%block-header-by-hash p=block-header-by-hash:update]
       [%block-header-by-height p=block-header-by-height:update]
+      [%filter-header-by-hash p=filter-header-by-hash:update]
+      [%filter-header-by-height p=filter-header-by-height:update]
       [%block-filter-by-hash p=block-filter-by-hash:update]
       [%block-filter-by-height p=block-filter-by-height:update]
       [%block-by-hash p=block-by-hash:update]
@@ -54,6 +57,7 @@
         last-common=[=block-height =block-hash]
         stale-branch=(list [=block-height =block-hash])
     ==  ==
+  +$  best-filter-header  [=block-height =block-hash]
   ::
   +$  block-header-by-hash
     $@  ~
@@ -64,6 +68,12 @@
     $:  block-info
         =block-header
     ==
+  ::
+  +$  filter-header-by-hash
+    $@  ~
+        @ux
+  +$  filter-header-by-height
+    @ux
   ::
   +$  block-filter-by-hash
     $@  ~

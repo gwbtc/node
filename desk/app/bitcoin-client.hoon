@@ -49,6 +49,7 @@
   ==
 +$  pending-block-height-req
   $%  [%block-header ~]
+      [%filter-header ~]
       [%block-filter ~]
       [%block ~]
   ==
@@ -73,7 +74,7 @@
 ::
 +$  block-cache         [size=@ud dat=(map block-hash hexb)]
 ::
-+$  state-1
++$  state-2
   $:  =network:b-net
       =protocol-version:b-net
       =services:b-net
@@ -94,6 +95,32 @@
       =block-headers
       =block-cache
   ==
+::
+++  state-1
+  =<  state
+  |%
+  +$  state
+    $:  =network:b-net
+        =protocol-version:b-net
+        =services:b-net
+        =config
+        =earth-peers
+        =earth-addresses
+        =earth-blacklist
+        =pending-block-hash-reqs
+        pending-block-height-reqs=pending-block-height-reqs:state-0
+        =header-sync-req
+        =tx-inv-broadcast-queue
+        =tx-broadcast-cache
+        =best-block
+        =bh-index
+        =best-filter-header
+        =filter-headers
+        =filter-cache
+        =block-headers
+        =block-cache
+    ==
+  --
 ::
 ++  state-0
   =<  state
@@ -139,15 +166,22 @@
         =ping-average
     ==
   +$  filters  (map block-hash filter:b-fil)
+  +$  pending-block-height-reqs
+    %+  jug  block-height
+    $%  [%block-header ~]
+        [%block-filter ~]
+        [%block ~]
+    ==
   --
 +$  state-n
-  $%  [%1 state-1]
+  $%  [%2 state-2]
+      [%1 state-1]
       [%0 state-0]
   ==
 +$  card  card:agent:gall
 --
 ::
-=+  [%1 *state-1]
+=+  [%2 *state-2]
 =*  state  -
 =>
 ::
@@ -298,6 +332,14 @@
         block-height.best-block
         block-hash.best-block
   ::
+      [%x %best-filter-header ~]
+    :+  ~  ~
+    :-  %bitcoin-client-update
+    !>
+    ^-  bitcoin-client-update
+    :-  %best-filter-header
+        best-filter-header
+  ::
       [%x %block-header %hash block-hash=@ta ~]
     =/  haz  (slav %ux block-hash.poe)
     =/  dat
@@ -336,6 +378,31 @@
     ^-  bitcoin-client-update
     :-  %block-header-by-height
         dat
+  ::
+      [%x %filter-header %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  fed  (~(get by filter-headers) haz)
+    :+  ~  ~
+    :-  %bitcoin-client-update
+    !>
+    ^-  bitcoin-client-update
+    :-  %filter-header-by-hash
+    ?~  fed
+        ~
+        u.fed
+  ::
+      [%x %filter-header %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    =/  haz  (get:on-bh-index bh-index het)
+    ?~  haz  ~^~
+    =/  fed  (~(get by filter-headers) u.haz)
+    ?~  fed  ~^~
+    :+  ~  ~
+    :-  %bitcoin-client-update
+    !>
+    ^-  bitcoin-client-update
+    :-  %filter-header-by-height
+        u.fed
   ::
       [%x %peers ~]
     :+  ~  ~
@@ -398,6 +465,29 @@
           chainwork.hed
       ==
     =/  req  [%block-header ~]
+    ?:  (~(has ju pending-block-height-reqs) het req)  cor
+    %_  cor
+        pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
+    ==
+  ::
+      [%filter-header %hash block-hash=@ta ~]
+    =/  haz  (slav %ux block-hash.poe)
+    =/  fed  (~(get by filter-headers) haz)
+    %-  emil
+    %-  ~(res ~(filter-header-by-hash make-update ~^src.bowl) haz)
+    ?~  fed
+        ~
+        u.fed
+  ::
+      [%filter-header %height block-height=@ta ~]
+    =/  het  (slav %ud block-height.poe)
+    ?:  (lte het block-height.best-filter-header)
+      =/  haz  (got:on-bh-index bh-index het)
+      =/  fed  (~(got by filter-headers) haz)
+      %-  emil
+      %-  ~(res ~(filter-header-by-height make-update ~^src.bowl) het)
+          fed
+    =/  req  [%filter-header ~]
     ?:  (~(has ju pending-block-height-reqs) het req)  cor
     %_  cor
         pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
@@ -930,6 +1020,30 @@
       |=  dat=block-header-by-height:update
       ^-  (list card)
       :~  (fact sub %block-header-by-height dat)
+          end
+      ==
+    --
+  ::
+  ++  filter-header-by-hash
+    |_  haz=block-hash
+    ++  sub  /filter-header/hash/[(scot %ux haz)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=filter-header-by-hash:update
+      ^-  (list card)
+      :~  (fact sub %filter-header-by-hash dat)
+          end
+      ==
+    --
+  ::
+  ++  filter-header-by-height
+    |_  het=block-height
+    ++  sub  /filter-header/height/[(scot %ud het)]
+    ++  end  (kick sub)
+    ++  res
+      |=  dat=filter-header-by-height:update
+      ^-  (list card)
+      :~  (fact sub %filter-header-by-height dat)
           end
       ==
     --
@@ -2027,12 +2141,24 @@
       %~  is-synced  make-update  ~
     =/  haz  (got:on-bh-index bh-index het)
     =/  fed  (make-filter-header:b-fil pre i.filter-hashes.msg)
+    =:  best-filter-header  [het haz]
+        filter-headers      (~(put by filter-headers) haz fed)
+      ==
     =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
     =.  cor
       |-
       ?~  height-reqs  cor
       =.  cor
         ?+  -.i.height-reqs  cor
+        ::
+            %filter-header
+          =.  pending-block-height-reqs
+            %+  ~(del ju pending-block-height-reqs)
+                het
+                i.height-reqs
+          %-  emil
+          %-  ~(res ~(filter-header-by-height make-update ~) het)
+              fed
         ::
             %block-filter
           =/  som  (get-some-peer |)
@@ -2053,8 +2179,6 @@
         filter-hashes.msg   t.filter-hashes.msg
         pre                 fed
         het                 +(het)
-        best-filter-header  [het haz]
-        filter-headers      (~(put by filter-headers) haz fed)
     ==
   ::
       %headers
@@ -2268,9 +2392,10 @@
         %+  turn  ~(tap in val)
         |=  req=pending-block-height-req
         ?-  -.req
-            %block-header  ~(end ~(block-header-by-height make-update ~) key)
-            %block-filter  ~(end ~(block-filter-by-height make-update ~) key)
-            %block         ~(end ~(block-by-height make-update ~) key)
+            %block-header   ~(end ~(block-header-by-height make-update ~) key)
+            %filter-header  ~(end ~(filter-header-by-height make-update ~) key)
+            %block-filter   ~(end ~(block-filter-by-height make-update ~) key)
+            %block          ~(end ~(block-by-height make-update ~) key)
         ==
       =.  pending-block-height-reqs  ~
       =.  cor
@@ -2450,14 +2575,19 @@
 ++  load
   |=  vaz=vase
   ^+  cor
-  =.  state
-    =/  old  !<(state-n vaz)
-    ?-  -.old
-        %1  old
-        %0  (state-0-to-1 old)
-    ==
+  =/  old  !<(state-n vaz)
+  =?  old  ?=(%0 -.old)  (state-0-to-1 old)
+  =?  old  ?=(%1 -.old)  (state-1-to-2 old)
+  ?>       ?=(%2 -.old)
+  =.  state  old
   =.  cor  connect-to-more-peers
   cor
+::
+++  state-1-to-2
+  |=  [%1 old=state-1]
+  :-  %2
+  ^-  state-2
+  old
 ::
 ++  state-0-to-1
   |=  [%0 old=state-0]

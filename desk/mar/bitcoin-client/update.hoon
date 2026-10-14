@@ -16,10 +16,16 @@
       (tagged 'is-synced' [%b p.upd])
         %best-block
       (tagged 'best-block' (best-block-json p.upd))
+        %best-filter-header
+      (tagged 'best-filter-header' (block-height-hash-json block-height.p.upd block-hash.p.upd))
         %block-header-by-hash
       (tagged 'block-header-by-hash' (block-header-by-hash-json p.upd))
         %block-header-by-height
       (tagged 'block-header-by-height' (block-header-json p.upd))
+        %filter-header-by-hash
+      (tagged 'filter-header-by-hash' ?~(p.upd ~ (hex 32 p.upd)))
+        %filter-header-by-height
+      (tagged 'filter-header-by-height' (hex 32 p.upd))
         %block-filter-by-hash
       (tagged 'block-filter-by-hash' (block-filter-by-hash-json p.upd))
         %block-filter-by-height
