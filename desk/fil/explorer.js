@@ -9,15 +9,21 @@ let channelActId = 0;
 let bestBlockSubscribed = false;
 let bestBlockPollTimer = null;
 let bestBlockPollInFlight = false;
+let bestFilterHeaderPollTimer = null;
+let bestFilterHeaderPollInFlight = false;
 
 const explorerState = {
   network: null,
   isSynced: null,
   bestBlock: null,
+  bestFilterHeader: null,
   headers: new Map(),
   headerHashesByHeight: new Map(),
   headerWindow: null,
   pendingHeaderHeights: new Set(),
+  filterHeadersByHeight: new Map(),
+  pendingFilterHeaderHeights: new Set(),
+  filterHeaderHeightsInFlight: new Set(),
   peers: null,
   addresses: null,
   blacklist: null,
@@ -96,6 +102,7 @@ async function connectToShip() {
   ]);
   eventSource = new EventSource(channelPath);
   eventSource.addEventListener('message', handleChannelStream);
+  updateBestFilterHeaderPolling();
 }
 
 async function handleChannelStream(event) {
@@ -244,6 +251,7 @@ function handleIsSynced(isSynced) {
     startBestBlockPolling();
   }
 
+  updateBestFilterHeaderPolling();
   if (syncStatusChanged) renderExplorer();
 }
 
@@ -313,6 +321,67 @@ async function pollBestBlock() {
   }
 }
 
+function shouldPollBestFilterHeader() {
+  const { isSynced, bestBlock, bestFilterHeader } = explorerState;
+  return !(isSynced === true && bestBlock && bestFilterHeader &&
+    bestFilterHeader.height === bestBlock.height &&
+    bestFilterHeader.hash === bestBlock.hash);
+}
+
+function updateBestFilterHeaderPolling() {
+  if (!shouldPollBestFilterHeader()) {
+    if (bestFilterHeaderPollTimer !== null) {
+      clearTimeout(bestFilterHeaderPollTimer);
+      bestFilterHeaderPollTimer = null;
+    }
+    return;
+  }
+
+  if (bestFilterHeaderPollInFlight || bestFilterHeaderPollTimer !== null) return;
+  pollBestFilterHeader();
+}
+
+function scheduleBestFilterHeaderPoll() {
+  if (!shouldPollBestFilterHeader() || bestFilterHeaderPollTimer !== null) return;
+
+  bestFilterHeaderPollTimer = setTimeout(() => {
+    bestFilterHeaderPollTimer = null;
+    pollBestFilterHeader();
+  }, bestBlockPollInterval);
+}
+
+async function pollBestFilterHeader() {
+  if (!shouldPollBestFilterHeader() || bestFilterHeaderPollInFlight) return;
+
+  bestFilterHeaderPollInFlight = true;
+  try {
+    const response = await fetch(`${scryBasePath}/best-filter-header.json`);
+    if (!response.ok) {
+      throw new Error(`Best filter header scry failed with status ${response.status}`);
+    }
+
+    const data = unwrapBitcoinClientUpdate(
+      await response.json(),
+      'best-filter-header'
+    );
+    const height = Number(data?.['block-height']);
+    const hash = data?.['block-hash'];
+    if (!Number.isSafeInteger(height) || height < 0 ||
+        typeof hash !== 'string' || !hash) {
+      throw new Error('Unexpected best filter header scry response');
+    }
+
+    explorerState.bestFilterHeader = { height, hash };
+    requestPendingFilterHeaders();
+    renderExplorer();
+  } catch {
+    // A later poll will retry until syncing is complete and both tips match.
+  } finally {
+    bestFilterHeaderPollInFlight = false;
+    scheduleBestFilterHeaderPoll();
+  }
+}
+
 function headerRowIsAtStart() {
   const row = document.querySelector('.block-header-row');
   return !row || row.scrollLeft <= 1;
@@ -329,6 +398,7 @@ function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
     previousBestBlock.hash !== nextBestBlock.hash;
 
   explorerState.bestBlock = nextBestBlock;
+  updateBestFilterHeaderPolling();
   if (!bestBlockChanged) return;
 
   if (!explorerState.headerWindow) {
@@ -478,6 +548,7 @@ function handleHeaderScryError(type, value) {
 }
 
 async function scryBlockHeaderByHeight(height) {
+  requestFilterHeaderByHeight(height);
   try {
     const hoonHeight = formatHoonDecimal(height);
     const headerJson = await scryBlockHeader(
@@ -495,9 +566,60 @@ async function scryBlockHeaderByHash(blockHash) {
     const headerJson = await scryBlockHeader(
       `/block-header/hash/${hoonHash}`
     );
+    if (headerJson) {
+      requestFilterHeaderByHeight(Number(headerJson['block-info']['block-height']));
+    }
     handleBlockHeader(headerJson);
   } catch {
     handleHeaderScryError('hash', blockHash);
+  }
+}
+
+function requestFilterHeaderByHeight(height) {
+  if (!Number.isSafeInteger(height) || height < 0) return;
+
+  explorerState.pendingFilterHeaderHeights.add(height);
+  const bestFilterHeader = explorerState.bestFilterHeader;
+  if (!bestFilterHeader || height > bestFilterHeader.height ||
+      explorerState.filterHeaderHeightsInFlight.has(height)) {
+    return;
+  }
+
+  scryFilterHeaderByHeight(height);
+}
+
+function requestPendingFilterHeaders() {
+  for (const height of explorerState.pendingFilterHeaderHeights) {
+    requestFilterHeaderByHeight(height);
+  }
+}
+
+async function scryFilterHeaderByHeight(height) {
+  explorerState.filterHeaderHeightsInFlight.add(height);
+  try {
+    const hoonHeight = formatHoonDecimal(height);
+    const response = await fetch(
+      `${scryBasePath}/filter-header/height/${hoonHeight}.json`
+    );
+    if (!response.ok) {
+      throw new Error(`Filter header scry failed with status ${response.status}`);
+    }
+
+    const filterHeader = unwrapBitcoinClientUpdate(
+      await response.json(),
+      'filter-header-by-height'
+    );
+    if (typeof filterHeader !== 'string' || !/^[0-9a-f]{64}$/i.test(filterHeader)) {
+      throw new Error('Unexpected filter header scry response');
+    }
+
+    explorerState.filterHeadersByHeight.set(height, filterHeader);
+    explorerState.pendingFilterHeaderHeights.delete(height);
+    if (headerWindowHasHeight(height)) renderExplorer();
+  } catch {
+    // Keep the height pending for the next filter tip poll or header request.
+  } finally {
+    explorerState.filterHeaderHeightsInFlight.delete(height);
   }
 }
 
@@ -1154,6 +1276,24 @@ function BlockHeaderCard(header, selectedBlock) {
   const isSelected = selectedBlock?.height === header.height &&
     selectedBlock.hash === header.hash;
   const cardKey = `block-header:${header.hash}`;
+  const filterHeader = explorerState.filterHeadersByHeight.get(header.height);
+  const filterHeaderLine = filterHeader
+    ? element('p', {
+      key: `${cardKey}:filter-header`,
+      className: 'block-header-card__hash block-header-card__filter-header',
+      text: `${filterHeader.slice(0, 6)}....${filterHeader.slice(-6)}`,
+      attributes: { 'aria-label': `Filter header ${filterHeader}`, title: filterHeader }
+    })
+    : element('p', {
+      key: `${cardKey}:filter-header`,
+      className: 'block-header-card__hash block-header-card__filter-header block-header-card__filter-header--loading',
+      attributes: { 'aria-label': 'Loading filter header', role: 'status' }
+    }, Array.from({ length: 4 }, (_, index) => element('span', {
+      key: `${cardKey}:filter-header:dot:${index}`,
+      className: 'block-header-card__loading-dot',
+      text: '.',
+      attributes: { 'aria-hidden': 'true' }
+    })));
   const card = element('article', {
     key: cardKey,
     className: `block-header-card${isSelected ? ' block-header-card--selected' : ''}`,
@@ -1171,11 +1311,17 @@ function BlockHeaderCard(header, selectedBlock) {
       className: 'block-header-card__height',
       text: Number(header.height).toLocaleString()
     }),
-    element('p', {
-      key: `${cardKey}:hash`,
-      className: 'block-header-card__hash',
-      text: header.hash
-    }),
+    element('div', {
+      key: `${cardKey}:bytes`,
+      className: 'block-header-card__bytes'
+    }, [
+      element('p', {
+        key: `${cardKey}:hash`,
+        className: 'block-header-card__hash',
+        text: header.hash
+      }),
+      filterHeaderLine
+    ]),
     element('p', {
       key: `${cardKey}:time`,
       className: 'block-header-card__meta',
