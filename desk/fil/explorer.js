@@ -615,7 +615,7 @@ async function scryFilterHeaderByHeight(height) {
 
     explorerState.filterHeadersByHeight.set(height, filterHeader);
     explorerState.pendingFilterHeaderHeights.delete(height);
-    if (headerWindowHasHeight(height)) renderExplorer();
+    updateFilterHeaderLine(height);
   } catch {
     // Keep the height pending for the next filter tip poll or header request.
   } finally {
@@ -867,8 +867,11 @@ function restoreHeaderScrollAnchor(scrollAnchor) {
   );
   if (!row || !anchorCard) return;
 
+  const scrollLeft = anchorCard.offsetLeft - scrollAnchor.offset;
+  if (Math.abs(row.scrollLeft - scrollLeft) < 1) return;
+
   suppressHeaderScroll = true;
-  row.scrollLeft = anchorCard.offsetLeft - scrollAnchor.offset;
+  row.scrollLeft = scrollLeft;
   requestAnimationFrame(() => {
     suppressHeaderScroll = false;
   });
@@ -1255,6 +1258,37 @@ function reconcileNode(currentNode, nextNode) {
   return currentNode;
 }
 
+function updateFilterHeaderLine(height) {
+  const card = document.querySelector(
+    `.block-header-card[data-block-height="${height}"]`
+  );
+  const line = card?.querySelector('.block-header-card__filter-header');
+  if (!line) return;
+
+  reconcileNode(line, FilterHeaderLine(height, `block-header:${card.dataset.blockHash}`));
+}
+
+function FilterHeaderLine(height, cardKey) {
+  const filterHeader = explorerState.filterHeadersByHeight.get(height);
+  return filterHeader
+    ? element('p', {
+      key: `${cardKey}:filter-header`,
+      className: 'block-header-card__hash block-header-card__filter-header',
+      text: `${filterHeader.slice(0, 6)}....${filterHeader.slice(-6)}`,
+      attributes: { 'aria-label': `Filter header ${filterHeader}`, title: filterHeader }
+    })
+    : element('p', {
+      key: `${cardKey}:filter-header`,
+      className: 'block-header-card__hash block-header-card__filter-header block-header-card__filter-header--loading',
+      attributes: { 'aria-label': 'Loading filter header', role: 'status' }
+    }, Array.from({ length: 4 }, (_, index) => element('span', {
+      key: `${cardKey}:filter-header:dot:${index}`,
+      className: 'block-header-card__loading-dot',
+      text: '.',
+      attributes: { 'aria-hidden': 'true' }
+    })));
+}
+
 function BlockHeaderCard(header, selectedBlock) {
   if (header.isPlaceholder) {
     return element('article', {
@@ -1276,24 +1310,6 @@ function BlockHeaderCard(header, selectedBlock) {
   const isSelected = selectedBlock?.height === header.height &&
     selectedBlock.hash === header.hash;
   const cardKey = `block-header:${header.hash}`;
-  const filterHeader = explorerState.filterHeadersByHeight.get(header.height);
-  const filterHeaderLine = filterHeader
-    ? element('p', {
-      key: `${cardKey}:filter-header`,
-      className: 'block-header-card__hash block-header-card__filter-header',
-      text: `${filterHeader.slice(0, 6)}....${filterHeader.slice(-6)}`,
-      attributes: { 'aria-label': `Filter header ${filterHeader}`, title: filterHeader }
-    })
-    : element('p', {
-      key: `${cardKey}:filter-header`,
-      className: 'block-header-card__hash block-header-card__filter-header block-header-card__filter-header--loading',
-      attributes: { 'aria-label': 'Loading filter header', role: 'status' }
-    }, Array.from({ length: 4 }, (_, index) => element('span', {
-      key: `${cardKey}:filter-header:dot:${index}`,
-      className: 'block-header-card__loading-dot',
-      text: '.',
-      attributes: { 'aria-hidden': 'true' }
-    })));
   const card = element('article', {
     key: cardKey,
     className: `block-header-card${isSelected ? ' block-header-card--selected' : ''}`,
@@ -1320,7 +1336,7 @@ function BlockHeaderCard(header, selectedBlock) {
         className: 'block-header-card__hash',
         text: header.hash
       }),
-      filterHeaderLine
+      FilterHeaderLine(header.height, cardKey)
     ]),
     element('p', {
       key: `${cardKey}:time`,
