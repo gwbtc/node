@@ -1735,7 +1735,7 @@ function TransactionCard(transaction, index, blockHash) {
       element('span', {
         key: `${transactionKey}:title`,
         className: 'transaction-card__title',
-        text: `Transaction ${index + 1}`
+        text: `Transaction ${index}`
       }),
       element('span', {
         key: `${transactionKey}:counts`,
@@ -2106,13 +2106,15 @@ function BanControls(peer, actionButton, {
 
   const reason = element('input', {
     key: `${formKey}:reason:input`,
-    attributes: { type: 'text', value: draft.reason, placeholder: 'Reason for ban' }
+    attributes: {
+      type: 'text', value: draft.reason, placeholder: 'Reason for ban', 'aria-label': 'Ban reason'
+    }
   });
   listen(reason, 'input', (event) => { draft.reason = event.currentTarget.value; });
   const expiration = element('input', {
     key: `${formKey}:expiration:input`,
     attributes: {
-      type: 'datetime-local', value: draft.expiration,
+      type: 'datetime-local', value: draft.expiration, 'aria-label': 'Expiration (local time)',
       ...(draft.noExpiration ? { disabled: '' } : {})
     }
   });
@@ -2128,13 +2130,13 @@ function BanControls(peer, actionButton, {
     (alwaysVisible || draft.enabled) && element('div', {
       key: `${formKey}:fields`, className: 'peer-ban-form__fields'
     }, [element('label', { key: `${formKey}:reason`, className: 'peer-ban-form__field' }, [
-      element('span', { text: 'Reason' }), reason
+      reason
     ]),
     checkbox('no-expiration', 'No expiration', draft.noExpiration, (checked) => {
       draft.noExpiration = checked;
     }),
     element('label', { key: `${formKey}:expiration`, className: 'peer-ban-form__field' }, [
-      element('span', { text: 'Expiration (local time)' }), expiration
+      expiration
     ]),
     draft.error && element('p', {
       key: `${formKey}:error`, className: 'peer-ban-form__error',
@@ -2158,8 +2160,7 @@ function PeerCard(peer) {
   const peerRenderKey = `peer:${key}`;
   const isDisconnecting = explorerState.pendingPeerDisconnects.has(key);
   const isSettingsOpen = explorerState.peerSettingsOpen.has(key);
-  const disconnectLabel = explorerState.peerBanForms.get(key)?.enabled
-    ? 'Ban & disconnect' : 'Disconnect';
+  const disconnectLabel = 'Disconnect';
   const settingsButton = element('button', {
     key: `${peerRenderKey}:settings`,
     className: 'peer-card__settings',
@@ -3119,25 +3120,6 @@ function ExplorerApp(state) {
     key: 'explorer',
     className: 'explorer'
   }, [
-    element('header', {
-      key: 'explorer-header',
-      className: 'explorer__header'
-    }, [
-      element('h1', {
-        key: 'explorer-title',
-        className: 'explorer__title'
-      }, [
-        element('span', {
-          key: 'explorer-title:initials',
-          className: 'explorer__initials',
-          text: 'GW'
-        }),
-        element('span', {
-          key: 'explorer-title:name',
-          text: '%explorer'
-        })
-      ])
-    ]),
     BlockHeaderPanel(visibleHeaders(state), selectedBlock),
     element('section', {
       key: 'explorer-lower-region',
