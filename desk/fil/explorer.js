@@ -11,6 +11,7 @@ let bestBlockPollTimer = null;
 let bestBlockPollInFlight = false;
 let bestFilterHeaderPollTimer = null;
 let bestFilterHeaderPollInFlight = false;
+let headerViewedFrame = null;
 
 const explorerState = {
   network: null,
@@ -21,6 +22,7 @@ const explorerState = {
   isSynced: null,
   bestBlock: null,
   bestFilterHeader: null,
+  highestViewedHeaderHeight: null,
   headers: new Map(),
   headerHashesByHeight: new Map(),
   headerWindow: null,
@@ -452,6 +454,9 @@ function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
     previousBestBlock.hash !== nextBestBlock.hash;
 
   explorerState.bestBlock = nextBestBlock;
+  if (explorerState.highestViewedHeaderHeight === null) {
+    explorerState.highestViewedHeaderHeight = nextBestBlock.height;
+  }
   updateBestFilterHeaderPolling();
   if (!bestBlockChanged) return;
 
@@ -964,7 +969,39 @@ function navigateHeaderWindow(direction, row) {
   );
 }
 
+function scheduleViewedHeaderUpdate() {
+  if (headerViewedFrame !== null) return;
+  headerViewedFrame = requestAnimationFrame(() => {
+    headerViewedFrame = null;
+    updateViewedHeaderHeight();
+  });
+}
+
+function updateViewedHeaderHeight() {
+  const row = document.querySelector('.block-header-row');
+  if (!row || row.clientWidth === 0) return;
+  const bounds = row.getBoundingClientRect();
+  const left = bounds.left + row.clientLeft;
+  const right = left + row.clientWidth;
+  const cards = Array.from(row.querySelectorAll('[data-block-hash][data-block-height]'));
+  let highest = explorerState.highestViewedHeaderHeight ?? -1;
+  // Read positions before changing classes to avoid repeated layout work.
+  for (const card of cards) {
+    const edge = card.getBoundingClientRect().left;
+    if (edge >= left && edge < right) {
+      highest = Math.max(highest, Number(card.dataset.blockHeight));
+    }
+  }
+  if (highest >= 0) explorerState.highestViewedHeaderHeight = highest;
+  for (const card of cards) {
+    card.classList.toggle('block-header-card--new', Number(card.dataset.blockHeight) > highest);
+  }
+}
+
+addEventListener('resize', scheduleViewedHeaderUpdate);
+
 function handleHeaderPanelScroll(row) {
+  scheduleViewedHeaderUpdate();
   if (suppressHeaderScroll ||
       explorerState.pendingHeaderSearch ||
       explorerState.pendingHeaderHeights.size > 0) return;
@@ -1390,10 +1427,11 @@ function BlockHeaderCard(header, selectedBlock) {
 
   const isSelected = selectedBlock?.height === header.height &&
     selectedBlock.hash === header.hash;
+  const isNew = header.height > (explorerState.highestViewedHeaderHeight ?? -1);
   const cardKey = `block-header:${header.hash}`;
   const card = element('article', {
     key: cardKey,
-    className: `block-header-card${isSelected ? ' block-header-card--selected' : ''}`,
+    className: `block-header-card${isSelected ? ' block-header-card--selected' : ''}${isNew ? ' block-header-card--new' : ''}`,
     attributes: {
       'data-block-hash': header.hash,
       'data-block-height': header.height,
@@ -1508,7 +1546,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
     element('span', {
       key: 'best-block-button:arrow',
       className: 'block-header-tip-button__arrow',
-      text: '←',
+      text: '◁',
       attributes: { 'aria-hidden': 'true' }
     }),
     element('span', {
@@ -1539,6 +1577,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
   );
   requestAnimationFrame(() => {
     const currentHeaderRow = document.querySelector('.block-header-row');
+    updateViewedHeaderHeight();
     const currentBestBlockButton = document.querySelector(
       '.block-header-tip-button'
     );
@@ -2953,7 +2992,13 @@ function BlockDataTab(block, state) {
       'aria-controls': 'explorer-data-content'
     }
   });
-  listen(button, 'click', () => selectBlock(block));
+  listen(button, 'click', () => {
+    if (getSelectedBlock()?.hash === block.hash) {
+      centerHeaderWindow(block.height);
+    } else {
+      selectBlock(block);
+    }
+  });
   listen(button, 'keydown', (event) => {
     const tabs = Array.from(event.currentTarget.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
     const index = tabs.indexOf(event.currentTarget);

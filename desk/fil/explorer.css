@@ -224,8 +224,21 @@ dd {
   border-top: 2px solid #465b73;
   background: var(--explorer-surface);
   cursor: pointer;
-  transition: border-color 140ms ease,
-    background 140ms ease;
+  transition: border-color 140ms ease;
+}
+
+.block-header-card::before {
+  position: absolute;
+  inset: 0;
+  background: #21818a;
+  opacity: 0;
+  pointer-events: none;
+  content: "";
+  transition: opacity 1.8s ease;
+}
+
+.block-header-card > * {
+  position: relative;
 }
 
 .block-header-card:not(.block-header-card--placeholder):hover,
@@ -237,6 +250,11 @@ dd {
 .block-header-card--selected {
   border-color: var(--explorer-accent);
   background: var(--explorer-selected);
+}
+
+.block-header-card--new::before {
+  opacity: 0.28;
+  transition: none;
 }
 
 .block-header-card--selected:hover,
@@ -1405,6 +1423,11 @@ input[type="checkbox"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .block-header-card,
+  .block-header-card::before {
+    transition: none;
+  }
+
   .skeleton,
   .block-header-card__loading-dot,
   .block-data-loading__spinner,
