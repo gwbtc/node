@@ -14,6 +14,10 @@ let bestFilterHeaderPollInFlight = false;
 
 const explorerState = {
   network: null,
+  config: null,
+  configDraft: null,
+  configSaving: false,
+  configSaveError: null,
   isSynced: null,
   bestBlock: null,
   bestFilterHeader: null,
@@ -27,17 +31,27 @@ const explorerState = {
   peers: null,
   addresses: null,
   blacklist: null,
-  peerPanelTab: 'peers',
-  peerPanelPages: {
-    peers: 0,
-    addresses: 0,
-    blacklist: 0
-  },
+  selectedTab: { type: 'peers' },
+  peersPage: 0,
+  peerConnectAddress: '',
+  peerConnectPort: '',
+  peerConnectError: null,
+  peerConnectPending: false,
+  addressesPage: 0,
+  blacklistPage: 0,
+  openBlocks: new Map(),
+  blockTransactionPages: new Map(),
   pendingPeerDisconnects: new Set(),
+  pendingPeerConnects: new Set(),
+  peerSettingsOpen: new Set(),
+  peerBanForms: new Map(),
+  addressSettingsOpen: new Set(),
+  addressBanForms: new Map(),
+  pendingAddressRemovals: new Set(),
+  blacklistSettingsOpen: new Set(),
+  pendingPeerUnbans: new Set(),
   blocks: new Map(),
   pendingBlocks: new Set(),
-  selectedBlock: null,
-  transactionPage: 0,
   headerSearchQuery: '',
   headerSearchError: null,
   pendingHeaderSearch: null
@@ -46,7 +60,7 @@ let suppressHeaderScroll = false;
 const headerBatchSize = 20;
 const headerWindowSize = 60;
 const transactionBatchSize = 5;
-const peerPanelBatchSize = 5;
+const peerPanelBatchSize = 20;
 const bestBlockPollInterval = 3000;
 const peerServiceLabels = {
   'node-network': 'Network',
@@ -75,6 +89,12 @@ addEventListener('DOMContentLoaded', async () => {
   if (hasValidNetwork) connectToShip();
 });
 
+function handleConfig(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  explorerState.config = config;
+  if (explorerState.selectedTab.type === 'config') renderExplorer();
+}
+
 async function scryNetwork() {
   try {
     const response = await fetch(`${scryBasePath}/network.json`);
@@ -98,7 +118,8 @@ async function connectToShip() {
     makeSubscribe('/is-synced'),
     makeSubscribe('/peers'),
     makeSubscribe('/addresses'),
-    makeSubscribe('/blacklist')
+    makeSubscribe('/blacklist'),
+    makeSubscribe('/config')
   ]);
   eventSource = new EventSource(channelPath);
   eventSource.addEventListener('message', handleChannelStream);
@@ -115,7 +136,9 @@ async function handleChannelStream(event) {
   const update = parseBitcoinClientUpdate(msg.json);
   if (!update) return;
 
-  if (update.type === 'is-synced') {
+  if (update.type === 'config') {
+    handleConfig(update.data);
+  } else if (update.type === 'is-synced') {
     handleIsSynced(update.data);
   } else if (update.type === 'best-block' && bestBlockSubscribed) {
     handleBestBlockUpdate(update.data);
@@ -154,6 +177,20 @@ function cachePeer(address, info) {
   const key = peerKey(address);
   explorerState.peers ??= new Map();
   explorerState.peers.set(key, { key, address, info });
+  try {
+    const enteredAddress = parsePeerIp(explorerState.peerConnectAddress);
+    const port = explorerState.peerConnectPort.trim();
+    if (/^[0-9]+$/.test(port)) {
+      enteredAddress.port = Number(port);
+      if (peerKey(enteredAddress) === key) {
+        explorerState.peerConnectAddress = '';
+        explorerState.peerConnectPort = '';
+        explorerState.peerConnectError = null;
+      }
+    }
+  } catch {
+    // Incomplete form input does not identify a peer yet.
+  }
 }
 
 function handlePeers(peersUpdate) {
@@ -170,17 +207,28 @@ function handlePeers(peersUpdate) {
       }
     }
     if (explorerState.peers.size === 0) explorerState.peers = null;
+    for (const key of explorerState.peerSettingsOpen) {
+      if (!explorerState.peers?.has(key)) explorerState.peerSettingsOpen.delete(key);
+    }
+    for (const key of explorerState.peerBanForms.keys()) {
+      if (!explorerState.peers?.has(key)) explorerState.peerBanForms.delete(key);
+    }
   } else if (peersUpdate.type === 'put') {
     cachePeer(peersUpdate.address, peersUpdate.info);
   } else if (peersUpdate.type === 'del' && peersUpdate.address) {
     const key = peerKey(peersUpdate.address);
     explorerState.pendingPeerDisconnects.delete(key);
+    explorerState.peerSettingsOpen.delete(key);
+    explorerState.peerBanForms.delete(key);
     explorerState.peers?.delete(key);
     if (explorerState.peers?.size === 0) explorerState.peers = null;
   } else {
     return;
   }
 
+  for (const key of explorerState.pendingPeerConnects) {
+    if (explorerState.peers?.has(key)) explorerState.pendingPeerConnects.delete(key);
+  }
   renderExplorer();
 }
 
@@ -235,6 +283,12 @@ function handleBlacklist(blacklistUpdate) {
     return;
   }
 
+  for (const key of explorerState.pendingPeerUnbans) {
+    if (!explorerState.blacklist?.has(key)) {
+      explorerState.pendingPeerUnbans.delete(key);
+      explorerState.blacklistSettingsOpen.delete(key);
+    }
+  }
   renderExplorer();
 }
 
@@ -463,12 +517,14 @@ function handleBestBlockUpdate(bestBlockUpdate, options = {}) {
     const hash = staleBlock['block-hash'];
     explorerState.headers.delete(hash);
     explorerState.blocks.delete(hash);
+    explorerState.openBlocks.delete(hash);
+    explorerState.blockTransactionPages.delete(hash);
     if (explorerState.headerHashesByHeight.get(height) === hash) {
       explorerState.headerHashesByHeight.delete(height);
     }
-    if (explorerState.selectedBlock?.hash === hash) {
-      explorerState.selectedBlock = null;
-      explorerState.transactionPage = 0;
+    if (explorerState.selectedTab.type === 'block' &&
+        explorerState.selectedTab.hash === hash) {
+      explorerState.selectedTab = { type: 'peers' };
     }
   }
 
@@ -791,29 +847,28 @@ function handleBlock(blockJson) {
   });
   explorerState.pendingBlocks.delete(blockInfo['block-hash']);
 
-  if (explorerState.selectedBlock?.hash === blockInfo['block-hash']) {
+  if (getSelectedBlock()?.hash === blockInfo['block-hash']) {
     renderExplorer();
   }
 }
 
+function getSelectedBlock(state = explorerState) {
+  return state.selectedTab.type === 'block'
+    ? state.openBlocks.get(state.selectedTab.hash) ?? null
+    : null;
+}
+
 function selectBlock(header) {
-  const isSelected = explorerState.selectedBlock?.height === header.height &&
-    explorerState.selectedBlock.hash === header.hash;
-
-  if (isSelected) {
-    explorerState.selectedBlock = null;
-    explorerState.transactionPage = 0;
-    renderExplorer();
-    return;
-  }
-
   setSelectedBlock(header);
   renderExplorer();
 }
 
 function setSelectedBlock(header) {
-  explorerState.selectedBlock = header;
-  explorerState.transactionPage = 0;
+  explorerState.openBlocks.set(header.hash, header);
+  explorerState.selectedTab = { type: 'block', hash: header.hash };
+  if (!explorerState.blockTransactionPages.has(header.hash)) {
+    explorerState.blockTransactionPages.set(header.hash, 0);
+  }
 
   if (!explorerState.blocks.has(header.hash) &&
       !explorerState.pendingBlocks.has(header.hash)) {
@@ -1055,22 +1110,43 @@ function earthAddressJson(address) {
 async function disconnectPeer(peer) {
   if (explorerState.pendingPeerDisconnects.has(peer.key)) return;
 
+  const ban = explorerState.peerBanForms.get(peer.key);
+  const isBanning = ban?.enabled === true;
+  let action = 'disconnect-peer';
+  let payload = earthAddressJson(peer.address);
+  if (isBanning) {
+    ban.error = null;
+    const expiration = ban.noExpiration
+      ? null
+      : new Date(ban.expiration).getTime() - Date.now();
+    if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
+      ban.error = 'Choose a future expiration time or select No expiration.';
+      renderExplorer();
+      return;
+    }
+    action = 'ban-peer';
+    payload = {
+      'earth-address': payload,
+      reason: ban.reason,
+      // The action mark expects a duration in milliseconds, not an absolute time.
+      expiration
+    };
+  }
+
   explorerState.pendingPeerDisconnects.add(peer.key);
   renderExplorer();
 
   try {
     const response = await sendActions([
-      makeBitcoinClientAction(
-        'disconnect-peer',
-        earthAddressJson(peer.address)
-      )
+      makeBitcoinClientAction(action, payload)
     ]);
     if (!response.ok) {
-      throw new Error(`Disconnect poke failed with status ${response.status}`);
+      throw new Error(`${action} poke failed with status ${response.status}`);
     }
   } catch (error) {
     console.error(error);
     explorerState.pendingPeerDisconnects.delete(peer.key);
+    if (isBanning) ban.error = 'Unable to ban peer. Please try again.';
     renderExplorer();
   }
 }
@@ -1162,6 +1238,11 @@ function reconcileAttributes(currentElement, nextElement) {
     if (currentElement.getAttribute(attribute.name) !== attribute.value) {
       currentElement.setAttribute(attribute.name, attribute.value);
     }
+  }
+
+  if (currentElement instanceof HTMLInputElement &&
+      currentElement.checked !== nextElement.checked) {
+    currentElement.checked = nextElement.checked;
   }
 
   if ((currentElement instanceof HTMLInputElement ||
@@ -1696,7 +1777,11 @@ function TransactionCard(transaction, index, blockHash) {
 }
 
 function changeTransactionPage(page, pageCount) {
-  explorerState.transactionPage = Math.max(0, Math.min(page, pageCount - 1));
+  const block = getSelectedBlock();
+  if (!block) return;
+  explorerState.blockTransactionPages.set(
+    block.hash, Math.max(0, Math.min(page, pageCount - 1))
+  );
   renderExplorer();
 }
 
@@ -1985,6 +2070,81 @@ function PeerDetailField(peerRenderKey, field, label, value) {
   ]);
 }
 
+function BanControls(peer, actionButton, {
+  drafts = explorerState.peerBanForms, prefix = 'peer', label = 'Ban peer',
+  alwaysVisible = false
+} = {}) {
+  const formKey = `${prefix}:${peer.key}:ban`;
+  if (!drafts.has(peer.key)) {
+    drafts.set(peer.key, {
+      enabled: false, reason: '', noExpiration: true, expiration: ''
+    });
+  }
+  const draft = drafts.get(peer.key);
+  const checkbox = (name, label, checked, onChange) => {
+    const input = element('input', {
+      key: `${formKey}:${name}:input`,
+      attributes: { type: 'checkbox', ...(checked ? { checked: '' } : {}) }
+    });
+    listen(input, 'change', (event) => {
+      onChange(event.currentTarget.checked);
+      draft.error = null;
+      renderExplorer();
+    });
+    return element('label', {
+      key: `${formKey}:${name}`,
+      className: 'peer-ban-form__checkbox'
+    }, [input, element('span', { text: label })]);
+  };
+  const enable = alwaysVisible ? element('button', {
+    key: `${formKey}:ban-button`,
+    className: 'address-row__ban-button', text: 'Ban',
+    attributes: { type: 'button', disabled: '', title: 'Ban is not implemented yet' }
+  }) : checkbox('enabled', label, draft.enabled, (checked) => {
+    draft.enabled = checked;
+  });
+
+  const reason = element('input', {
+    key: `${formKey}:reason:input`,
+    attributes: { type: 'text', value: draft.reason, placeholder: 'Reason for ban' }
+  });
+  listen(reason, 'input', (event) => { draft.reason = event.currentTarget.value; });
+  const expiration = element('input', {
+    key: `${formKey}:expiration:input`,
+    attributes: {
+      type: 'datetime-local', value: draft.expiration,
+      ...(draft.noExpiration ? { disabled: '' } : {})
+    }
+  });
+  listen(expiration, 'input', (event) => { draft.expiration = event.currentTarget.value; });
+  const form = element('form', {
+    key: formKey,
+    className: 'peer-ban-form',
+    attributes: { 'aria-label': `Ban settings for ${peerEndpoint(peer.address)}` }
+  }, [
+    element('div', {
+      key: `${formKey}:actions`, className: 'peer-ban-form__actions'
+    }, [actionButton, enable]),
+    (alwaysVisible || draft.enabled) && element('div', {
+      key: `${formKey}:fields`, className: 'peer-ban-form__fields'
+    }, [element('label', { key: `${formKey}:reason`, className: 'peer-ban-form__field' }, [
+      element('span', { text: 'Reason' }), reason
+    ]),
+    checkbox('no-expiration', 'No expiration', draft.noExpiration, (checked) => {
+      draft.noExpiration = checked;
+    }),
+    element('label', { key: `${formKey}:expiration`, className: 'peer-ban-form__field' }, [
+      element('span', { text: 'Expiration (local time)' }), expiration
+    ]),
+    draft.error && element('p', {
+      key: `${formKey}:error`, className: 'peer-ban-form__error',
+      text: draft.error, attributes: { role: 'alert' }
+    })])
+  ]);
+  listen(form, 'submit', (event) => event.preventDefault());
+  return form;
+}
+
 function PeerCard(peer) {
   const { key, address, info } = peer;
   const isActive = info['handshake-done'] === true;
@@ -1997,13 +2157,33 @@ function PeerCard(peer) {
   ];
   const peerRenderKey = `peer:${key}`;
   const isDisconnecting = explorerState.pendingPeerDisconnects.has(key);
+  const isSettingsOpen = explorerState.peerSettingsOpen.has(key);
+  const disconnectLabel = explorerState.peerBanForms.get(key)?.enabled
+    ? 'Ban & disconnect' : 'Disconnect';
+  const settingsButton = element('button', {
+    key: `${peerRenderKey}:settings`,
+    className: 'peer-card__settings',
+    text: '⚙',
+    attributes: {
+      type: 'button',
+      title: isSettingsOpen ? 'Close peer settings' : 'Peer settings',
+      'aria-label': `Settings for ${peerEndpoint(address)}`,
+      'aria-expanded': String(isSettingsOpen),
+      'aria-pressed': String(isSettingsOpen)
+    }
+  });
+  listen(settingsButton, 'click', () => {
+    if (explorerState.peerSettingsOpen.has(key)) explorerState.peerSettingsOpen.delete(key);
+    else explorerState.peerSettingsOpen.add(key);
+    renderExplorer();
+  });
   const disconnectButton = element('button', {
     key: `${peerRenderKey}:disconnect`,
     className: 'peer-card__disconnect',
     attributes: {
       type: 'button',
-      title: `Disconnect ${peerEndpoint(address)}`,
-      'aria-label': `Disconnect ${peerEndpoint(address)}`,
+      title: `${disconnectLabel} ${peerEndpoint(address)}`,
+      'aria-label': `${disconnectLabel} ${peerEndpoint(address)}`,
       ...(isDisconnecting ? {
         disabled: '',
         'aria-busy': 'true'
@@ -2018,7 +2198,7 @@ function PeerCard(peer) {
         })
       : element('span', {
           key: `${peerRenderKey}:disconnect:label`,
-          text: 'Disconnect'
+          text: disconnectLabel
         })
   ]);
   listen(disconnectButton, 'click', () => disconnectPeer(peer));
@@ -2043,19 +2223,24 @@ function PeerCard(peer) {
         }`,
         attributes: { 'aria-hidden': 'true' }
       }),
-      element('code', {
-        key: `${peerRenderKey}:endpoint`,
-        className: 'peer-card__endpoint',
-        text: peerEndpoint(address)
-      }),
       element('span', {
         key: `${peerRenderKey}:network-id`,
         className: 'peer-card__network-id',
         text: String(address['network-id'] ?? 'unknown').toUpperCase()
       }),
-      disconnectButton
+      element('code', {
+        key: `${peerRenderKey}:endpoint`,
+        className: 'peer-card__endpoint',
+        text: peerEndpoint(address)
+      }),
+      settingsButton
     ]),
-    element('dl', {
+    ...(isSettingsOpen ? [element('div', {
+      key: `${peerRenderKey}:settings-actions`,
+      className: 'peer-card__settings-actions'
+    }, [
+      BanControls(peer, disconnectButton)
+    ])] : [element('dl', {
       key: `${peerRenderKey}:metadata`,
       className: 'peer-card__metadata'
     }, [
@@ -2087,7 +2272,7 @@ function PeerCard(peer) {
         key: `${peerRenderKey}:service:${service}`,
         className: 'peer-card__service',
         text: service
-      })))
+      })))])
   ]);
 }
 
@@ -2114,133 +2299,221 @@ function formatDuration(milliseconds) {
   return `${Math.floor(hours / 24)} d`;
 }
 
-function AddressCard(entry, isConnected = false) {
-  const { key, address, info } = entry;
-  const cardKey = `address:${key}`;
+async function connectAddress(entry) {
+  if (explorerState.pendingPeerConnects.has(entry.key) ||
+      explorerState.peers?.has(entry.key)) return;
 
-  if (isConnected) {
-    return element('article', {
-      key: cardKey,
-      className: 'network-entry-card network-entry-card--connected',
-      attributes: {
-        'aria-label': `${peerEndpoint(address)}, connected`
-      }
-    }, [
-      element('code', {
-        key: `${cardKey}:endpoint`,
-        className: 'peer-card__endpoint',
-        text: peerEndpoint(address)
-      }),
-      element('span', {
-        key: `${cardKey}:connected`,
-        className: 'network-entry-card__connected-label',
-        text: 'Connected'
-      })
+  explorerState.pendingPeerConnects.add(entry.key);
+  renderExplorer();
+  try {
+    const response = await sendActions([
+      makeBitcoinClientAction('connect-peer', earthAddressJson(entry.address))
     ]);
+    if (!response.ok) {
+      throw new Error(`Connect poke failed with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    explorerState.pendingPeerConnects.delete(entry.key);
+    renderExplorer();
+  }
+}
+
+async function removeAddress(entry) {
+  if (explorerState.pendingAddressRemovals.has(entry.key)) return;
+  const ban = explorerState.addressBanForms.get(entry.key);
+  const isBanning = ban?.enabled === true;
+  let action = 'del-address';
+  let payload = earthAddressJson(entry.address);
+  if (isBanning) {
+    ban.error = null;
+    const expiration = ban.noExpiration
+      ? null
+      : new Date(ban.expiration).getTime() - Date.now();
+    if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
+      ban.error = 'Choose a future expiration time or select No expiration.';
+      renderExplorer();
+      return;
+    }
+    action = 'ban-peer';
+    payload = { 'earth-address': payload, reason: ban.reason, expiration };
   }
 
-  const services = activePeerServices(info.services);
+  explorerState.pendingAddressRemovals.add(entry.key);
+  renderExplorer();
+  try {
+    const response = await sendActions([makeBitcoinClientAction(action, payload)]);
+    if (!response.ok) {
+      throw new Error(`${action} poke failed with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error(error);
+    if (isBanning) ban.error = 'Unable to ban address. Please try again.';
+  } finally {
+    explorerState.pendingAddressRemovals.delete(entry.key);
+    renderExplorer();
+  }
+}
+
+function AddressCard(entry, peer = null) {
+  const isConnected = peer !== null;
+  const connectionStatus = peer?.info['handshake-done'] === true ? 'Connected' : 'Connecting';
+  const { key, address, info } = entry;
+  const rowKey = `address:${key}`;
+  const rank = info['address-rank'] ?? 'unknown';
+  const isSettingsOpen = explorerState.addressSettingsOpen.has(key);
+  const settingsButton = element('button', {
+    key: `${rowKey}:settings`,
+    className: 'peer-card__settings address-row__settings',
+    text: '⚙',
+    attributes: {
+      type: 'button', 'aria-label': `Settings for ${peerEndpoint(address)}`,
+      'aria-expanded': String(isSettingsOpen), 'aria-pressed': String(isSettingsOpen)
+    }
+  });
+  listen(settingsButton, 'click', () => {
+    if (explorerState.addressSettingsOpen.has(key)) explorerState.addressSettingsOpen.delete(key);
+    else explorerState.addressSettingsOpen.add(key);
+    renderExplorer();
+  });
+  const isConnecting = explorerState.pendingPeerConnects.has(key);
+  const connectButton = element('button', {
+    key: `${rowKey}:connect`, className: 'peer-card__disconnect address-row__connect',
+    text: isConnecting ? 'Connecting…' : 'Connect',
+    attributes: {
+      type: 'button',
+      ...(isConnecting || isConnected ? { disabled: '' } : {}),
+      ...(isConnecting ? { 'aria-busy': 'true' } : {})
+    }
+  });
+  listen(connectButton, 'click', () => connectAddress(entry));
+  const isRemoving = explorerState.pendingAddressRemovals.has(key);
+  const removeButton = element('button', {
+    key: `${rowKey}:remove`, className: 'address-row__ban-button',
+    text: isRemoving ? 'Removing…' : 'Remove',
+    attributes: {
+      type: 'button',
+      ...(isRemoving ? { disabled: '', 'aria-busy': 'true' } : {})
+    }
+  });
+  listen(removeButton, 'click', () => removeAddress(entry));
+  const fields = [
+    ['type', String(address['network-id'] ?? 'unknown').toUpperCase()],
+    ['value', peerEndpoint(address)],
+    ...(isSettingsOpen ? [] : isConnected
+      ? [['connected', connectionStatus]]
+      : [
+        ['last-heard', `Last heard: ${formatPeerTimestamp(info['last-heard'])}`],
+        ['source', `Source: ${formatAddressProvenance(info['address-provenance'])}`]
+      ])
+  ];
 
   return element('article', {
-    key: cardKey,
-    className: 'peer-card network-entry-card'
+    key: rowKey,
+    className: `address-row${isConnected ? ' address-row--connected' : ''}`,
+    attributes: { 'aria-label': `${peerEndpoint(address)}${isConnected ? `, ${connectionStatus.toLowerCase()}` : ''}` }
   }, [
-    element('header', {
-      key: `${cardKey}:header`,
-      className: 'network-entry-card__header'
-    }, [
-      element('code', {
-        key: `${cardKey}:endpoint`,
-        className: 'peer-card__endpoint',
-        text: peerEndpoint(address)
-      }),
-      element('span', {
-        key: `${cardKey}:rank`,
-        className: `network-entry-card__badge network-entry-card__badge--${
-          info['address-rank'] ?? 'unknown'
-        }`,
-        text: String(info['address-rank'] ?? 'unknown').toUpperCase()
-      })
-    ]),
-    element('dl', {
-      key: `${cardKey}:metadata`,
-      className: 'peer-card__metadata'
-    }, [
-      PeerDetailField(
-        cardKey,
-        'provenance',
-        'Source',
-        formatAddressProvenance(info['address-provenance'])
-      ),
-      PeerDetailField(
-        cardKey,
-        'last-heard',
-        'Last heard',
-        formatPeerTimestamp(info['last-heard'])
-      )
-    ]),
-    element('div', {
-      key: `${cardKey}:services`,
-      className: 'peer-card__services',
-      attributes: { 'aria-label': 'Advertised services' }
-    }, (services.length > 0 ? services : ['No services']).map((service) =>
-      element('span', {
-        key: `${cardKey}:service:${service}`,
-        className: 'peer-card__service',
-        text: service
-      })))
+    element('span', {
+      key: `${rowKey}:rank`,
+      className: `address-row__rank network-entry-card__badge network-entry-card__badge--${rank}`,
+      text: String(rank).toUpperCase(),
+      attributes: { 'aria-label': `Address rank: ${rank}` }
+    }),
+    ...fields.map(([field, value]) => element('span', {
+      key: `${rowKey}:${field}`,
+      className: `address-row__${field}`,
+      text: value,
+      attributes: { title: `${field}: ${value}` }
+    })),
+    isSettingsOpen && element('div', {
+      key: `${rowKey}:settings-controls`, className: 'address-row__controls'
+    }, [BanControls(entry, removeButton, {
+      drafts: explorerState.addressBanForms, prefix: 'address', label: 'Ban address'
+    })]),
+    isSettingsOpen && connectButton,
+    settingsButton
   ]);
+}
+
+async function unbanPeer(entry) {
+  if (explorerState.pendingPeerUnbans.has(entry.key)) return;
+  explorerState.pendingPeerUnbans.add(entry.key);
+  renderExplorer();
+  try {
+    const response = await sendActions([
+      makeBitcoinClientAction('unban-peer', earthAddressJson(entry.address))
+    ]);
+    if (!response.ok) {
+      throw new Error(`Unban poke failed with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error(error);
+    explorerState.pendingPeerUnbans.delete(entry.key);
+    renderExplorer();
+  }
 }
 
 function BlacklistCard(entry) {
   const { key, address, info } = entry;
-  const cardKey = `blacklist:${key}`;
-  const expiration = info.expiration === null || info.expiration === undefined
+  const rowKey = `blacklist:${key}`;
+  const isSettingsOpen = explorerState.blacklistSettingsOpen.has(key);
+  const isUnbanning = explorerState.pendingPeerUnbans.has(key);
+  const unbanButton = element('button', {
+    key: `${rowKey}:unban`, className: 'peer-card__disconnect blacklist-row__unban',
+    text: isUnbanning ? 'Unbanning…' : 'Unban',
+    attributes: {
+      type: 'button',
+      ...(isUnbanning ? { disabled: '', 'aria-busy': 'true' } : {})
+    }
+  });
+  listen(unbanButton, 'click', () => unbanPeer(entry));
+  const settingsButton = element('button', {
+    key: `${rowKey}:settings`,
+    className: 'peer-card__settings blacklist-row__settings',
+    text: '⚙',
+    attributes: {
+      type: 'button', 'aria-label': `Settings for blacklisted ${peerEndpoint(address)}`,
+      'aria-expanded': String(isSettingsOpen), 'aria-pressed': String(isSettingsOpen)
+    }
+  });
+  listen(settingsButton, 'click', () => {
+    if (explorerState.blacklistSettingsOpen.has(key)) explorerState.blacklistSettingsOpen.delete(key);
+    else explorerState.blacklistSettingsOpen.add(key);
+    renderExplorer();
+  });
+  const duration = info.expiration === null || info.expiration === undefined
     ? 'Permanent'
     : formatDuration(info.expiration);
+  const fields = [
+    ['type', String(address['network-id'] ?? 'unknown').toUpperCase()],
+    ['value', peerEndpoint(address)],
+    ['reason', info.reason || 'No reason provided'],
+    ...(isSettingsOpen ? [] : [
+      ['when', `Blacklisted: ${formatPeerTimestamp(info.when)}`],
+      ['duration', `Duration: ${duration}`]
+    ])
+  ];
 
   return element('article', {
-    key: cardKey,
-    className: 'peer-card network-entry-card network-entry-card--blacklisted'
+    key: rowKey,
+    className: 'blacklist-row',
+    attributes: { 'aria-label': `Blacklisted ${peerEndpoint(address)}` }
   }, [
-    element('header', {
-      key: `${cardKey}:header`,
-      className: 'network-entry-card__header'
-    }, [
-      element('code', {
-        key: `${cardKey}:endpoint`,
-        className: 'peer-card__endpoint',
-        text: peerEndpoint(address)
-      }),
-      element('span', {
-        key: `${cardKey}:network-id`,
-        className: 'peer-card__network-id',
-        text: String(address['network-id'] ?? 'unknown').toUpperCase()
-      })
-    ]),
-    element('p', {
-      key: `${cardKey}:reason`,
-      className: 'network-entry-card__reason',
-      text: info.reason || 'No reason provided'
-    }),
-    element('dl', {
-      key: `${cardKey}:metadata`,
-      className: 'peer-card__metadata'
-    }, [
-      PeerDetailField(
-        cardKey,
-        'when',
-        'Blacklisted',
-        formatPeerTimestamp(info.when)
-      ),
-      PeerDetailField(cardKey, 'expiration', 'Expiration', expiration)
-    ])
+    ...fields.map(([field, value]) => element('span', {
+      key: `${rowKey}:${field}`,
+      className: `blacklist-row__${field}`,
+      text: value,
+      attributes: { title: `${field}: ${value}` }
+    })),
+    isSettingsOpen && unbanButton,
+    settingsButton
   ]);
 }
 
 function selectPeerPanelTab(tab, focus = false) {
-  if (explorerState.peerPanelTab === tab) return;
-  explorerState.peerPanelTab = tab;
+  if (explorerState.selectedTab.type === tab) return;
+  explorerState.selectedTab = { type: tab };
   renderExplorer();
   if (focus) {
     requestAnimationFrame(() => {
@@ -2250,7 +2523,7 @@ function selectPeerPanelTab(tab, focus = false) {
 }
 
 function PeerPanelTab(tab, label) {
-  const isSelected = explorerState.peerPanelTab === tab;
+  const isSelected = explorerState.selectedTab.type === tab;
   const button = element('button', {
     key: `peers-panel:tab:${tab}`,
     className: `peers-panel__tab${
@@ -2262,13 +2535,13 @@ function PeerPanelTab(tab, label) {
       type: 'button',
       role: 'tab',
       'aria-selected': isSelected ? 'true' : 'false',
-      'aria-controls': `peers-panel-content-${tab}`,
-      tabindex: isSelected ? '0' : '-1'
+      'aria-controls': 'explorer-data-content',
+      tabindex: isSelected || (getSelectedBlock() && tab === 'peers') ? '0' : '-1'
     }
   });
   listen(button, 'click', () => selectPeerPanelTab(tab));
   listen(button, 'keydown', (event) => {
-    const tabs = ['peers', 'addresses', 'blacklist'];
+    const tabs = ['peers', 'addresses', 'blacklist', 'config'];
     const currentIndex = tabs.indexOf(tab);
     let nextIndex = currentIndex;
     if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
@@ -2307,17 +2580,21 @@ function PeerPanelEmpty(tab, source, emptyText) {
 }
 
 function changePeerPanelPage(tab, page, pageCount) {
-  explorerState.peerPanelPages[tab] = Math.max(
+  explorerState[peerPageStateKey(tab)] = Math.max(
     0,
     Math.min(page, pageCount - 1)
   );
   renderExplorer();
 }
 
+function peerPageStateKey(tab) {
+  return { peers: 'peersPage', addresses: 'addressesPage', blacklist: 'blacklistPage' }[tab];
+}
+
 function PeerPanelPage(tab, entries, renderEntry) {
   const pageCount = Math.max(1, Math.ceil(entries.length / peerPanelBatchSize));
-  const page = Math.min(explorerState.peerPanelPages[tab] ?? 0, pageCount - 1);
-  explorerState.peerPanelPages[tab] = page;
+  const page = Math.min(explorerState[peerPageStateKey(tab)], pageCount - 1);
+  explorerState[peerPageStateKey(tab)] = page;
   const firstEntry = page * peerPanelBatchSize;
   const visibleEntries = entries.slice(
     firstEntry,
@@ -2335,7 +2612,7 @@ function PeerPanelPage(tab, entries, renderEntry) {
   }, [
     element('div', {
       key: `peers-panel:${tab}:list`,
-      className: 'peers-panel__list'
+      className: `peers-panel__list${tab !== 'peers' ? ' peers-panel__list--rows' : ''}`
     }, visibleEntries.map(renderEntry)),
     element('nav', {
       key: `peers-panel:${tab}:pagination`,
@@ -2366,24 +2643,141 @@ function PeerPanelPage(tab, entries, renderEntry) {
   ]);
 }
 
+function parsePeerIp(value) {
+  const parseIpv4 = (text) => {
+    const parts = text.split('.');
+    if (parts.length !== 4 || parts.some((part) =>
+      !/^(0|[1-9][0-9]{0,2})$/.test(part) || Number(part) > 255)) return null;
+    return parts.map(Number);
+  };
+  const host = value.trim();
+  const ipv4 = parseIpv4(host);
+  if (ipv4) {
+    return { 'network-id': 'ipv4', address: ipv4.map((byte) => byte.toString(16).padStart(2, '0')).join('') };
+  }
+
+  let ipv6 = host;
+  if (ipv6.startsWith('[') && ipv6.endsWith(']')) ipv6 = ipv6.slice(1, -1);
+  if (!ipv6.includes(':')) throw new Error('Enter a valid IPv4 or IPv6 address.');
+  if (ipv6.includes('.')) {
+    const tail = ipv6.lastIndexOf(':');
+    const bytes = parseIpv4(ipv6.slice(tail + 1));
+    if (!bytes) throw new Error('Enter a valid IPv6 address.');
+    ipv6 = ipv6.slice(0, tail + 1) +
+      ((bytes[0] << 8) | bytes[1]).toString(16) + ':' +
+      ((bytes[2] << 8) | bytes[3]).toString(16);
+  }
+  const halves = ipv6.split('::');
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const count = left.length + right.length;
+  if (halves.length > 2 ||
+      (halves.length === 1 ? count !== 8 : count >= 8) ||
+      [...left, ...right].some((group) => !/^[0-9a-f]{1,4}$/i.test(group))) {
+    throw new Error('Enter a valid IPv6 address.');
+  }
+  const groups = [...left, ...Array(8 - count).fill('0'), ...right];
+  return { 'network-id': 'ipv6', address: groups.map((group) => group.toLowerCase().padStart(4, '0')).join('') };
+}
+
+async function submitPeerConnect() {
+  if (explorerState.peerConnectPending) return;
+  explorerState.peerConnectError = null;
+  let address;
+  try {
+    address = parsePeerIp(explorerState.peerConnectAddress);
+    const port = explorerState.peerConnectPort.trim();
+    if (!/^[0-9]+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+      throw new Error('Enter a port between 1 and 65535.');
+    }
+    address.port = Number(port);
+  } catch (error) {
+    explorerState.peerConnectError = error.message;
+    renderExplorer();
+    return;
+  }
+  const key = peerKey(address);
+  if (explorerState.peers?.has(key) || explorerState.pendingPeerConnects.has(key)) {
+    explorerState.peerConnectError = 'Already connected or connecting to this address.';
+    renderExplorer();
+    return;
+  }
+
+  explorerState.peerConnectPending = true;
+  explorerState.pendingPeerConnects.add(key);
+  renderExplorer();
+  try {
+    const response = await sendActions([
+      makeBitcoinClientAction('connect-peer', address)
+    ]);
+    if (!response.ok) throw new Error('Unable to connect to peer. Please try again.');
+  } catch (error) {
+    explorerState.peerConnectError = error.message;
+  } finally {
+    explorerState.peerConnectPending = false;
+    explorerState.pendingPeerConnects.delete(key);
+    renderExplorer();
+  }
+}
+
+function PeerConnectForm() {
+  const address = element('input', {
+    key: 'peer-connect:address',
+    className: 'peer-connect-form__address',
+    attributes: {
+      type: 'text', placeholder: 'address', 'aria-label': 'Peer address',
+      value: explorerState.peerConnectAddress
+    }
+  });
+  const port = element('input', {
+    key: 'peer-connect:port',
+    className: 'peer-connect-form__port',
+    attributes: {
+      type: 'text', inputmode: 'numeric', placeholder: 'port', 'aria-label': 'Peer port',
+      value: explorerState.peerConnectPort
+    }
+  });
+  listen(address, 'input', (event) => { explorerState.peerConnectAddress = event.currentTarget.value; });
+  listen(port, 'input', (event) => { explorerState.peerConnectPort = event.currentTarget.value; });
+  const form = element('form', {
+    key: 'peer-connect', className: 'peer-connect-form',
+    attributes: { 'aria-label': 'Connect to a peer' }
+  }, [address, port, element('button', {
+    key: 'peer-connect:button', className: 'peer-card__disconnect',
+    text: explorerState.peerConnectPending ? 'Connecting…' : 'Connect',
+    attributes: {
+      type: 'submit',
+      ...(explorerState.peerConnectPending ? { disabled: '', 'aria-busy': 'true' } : {})
+    }
+  }), explorerState.peerConnectError && element('span', {
+    key: 'peer-connect:error', className: 'peer-connect-form__error',
+    text: explorerState.peerConnectError, attributes: { role: 'alert' }
+  })]);
+  listen(form, 'submit', (event) => {
+    event.preventDefault();
+    submitPeerConnect();
+  });
+  return form;
+}
+
 function PeersPanel(peers, addresses, blacklist, activeTab) {
   const visiblePeers = Array.from(peers?.values() ?? []).sort((first, second) => {
     const activeDifference = Number(second.info['handshake-done']) -
       Number(first.info['handshake-done']);
     return activeDifference || first.key.localeCompare(second.key);
   });
+  const addressRankOrder = { priority: 0, known: 1, unknown: 2 };
   const visibleAddresses = Array.from(addresses?.values() ?? [])
-    .sort((first, second) => first.key.localeCompare(second.key));
+    .sort((first, second) => {
+      const rankDifference = (addressRankOrder[first.info['address-rank']] ?? 2) -
+        (addressRankOrder[second.info['address-rank']] ?? 2);
+      return rankDifference || first.key.localeCompare(second.key);
+    });
   const visibleBlacklist = Array.from(blacklist?.values() ?? [])
     .sort((first, second) => first.key.localeCompare(second.key));
   const activePeerCount = visiblePeers.filter(
     (peer) => peer.info['handshake-done']
   ).length;
-  const tabs = [
-    ['peers', 'Peers'],
-    ['addresses', 'Addresses'],
-    ['blacklist', 'Blacklist']
-  ];
   const tabData = {
     peers: {
       source: peers,
@@ -2396,7 +2790,7 @@ function PeersPanel(peers, addresses, blacklist, activeTab) {
     addresses: {
       source: addresses,
       entries: visibleAddresses,
-      render: (entry) => AddressCard(entry, peers?.has(entry.key) === true),
+      render: (entry) => AddressCard(entry, peers?.get(entry.key) ?? null),
       count: visibleAddresses.length.toLocaleString(),
       countLabel: `${visibleAddresses.length} known addresses`,
       emptyText: 'No known addresses.'
@@ -2415,21 +2809,13 @@ function PeersPanel(peers, addresses, blacklist, activeTab) {
 
   return element('section', {
     key: 'peers-panel',
-    className: 'panel peers-panel',
+    className: 'peers-panel',
     attributes: { 'aria-label': 'Network connections and addresses' }
   }, [
     element('header', {
       key: 'peers-panel:header',
       className: 'panel__header peers-panel__header'
     }, [
-      element('div', {
-        key: 'peers-panel:tabs',
-        className: 'peers-panel__tabs',
-        attributes: {
-          role: 'tablist',
-          'aria-label': 'Network data'
-        }
-      }, tabs.map(([tab, label]) => PeerPanelTab(tab, label))),
       element('span', {
         key: 'peers-panel:count',
         className: 'peers-panel__count',
@@ -2437,7 +2823,8 @@ function PeersPanel(peers, addresses, blacklist, activeTab) {
         attributes: {
           'aria-label': currentTab.countLabel
         }
-      })
+      }),
+      currentTabName === 'peers' && PeerConnectForm()
     ]),
     currentTab.entries.length > 0
       ? PeerPanelPage(
@@ -2493,7 +2880,7 @@ function BlockDataPanel(block, blockData, transactionPage, bestBlock) {
 
   return element('section', {
     key: 'block-data-panel',
-    className: 'panel block-data-panel',
+    className: 'block-data-panel',
     attributes: block
       ? { 'aria-labelledby': 'block-data-title' }
       : { 'aria-label': 'Block data' }
@@ -2531,9 +2918,201 @@ function BlockDataPanel(block, blockData, transactionPage, bestBlock) {
   ]);
 }
 
+function closeBlockTab(hash) {
+  const hashes = Array.from(explorerState.openBlocks.keys());
+  const index = hashes.indexOf(hash);
+  if (index < 0) return;
+
+  const nextHash = index === 0 ? hashes[1] : hashes[index - 1];
+  explorerState.openBlocks.delete(hash);
+  explorerState.blockTransactionPages.delete(hash);
+  if (nextHash) {
+    setSelectedBlock(explorerState.openBlocks.get(nextHash));
+  } else {
+    explorerState.selectedTab = { type: 'config' };
+  }
+  renderExplorer();
+  document.getElementById(
+    nextHash ? `block-tab-${nextHash}` : 'peers-panel-tab-config'
+  )?.focus();
+}
+
+function BlockDataTab(block, state) {
+  const selected = getSelectedBlock(state)?.hash === block.hash;
+  const button = element('button', {
+    key: `block-tab:${block.hash}`,
+    className: `peers-panel__tab${selected ? ' peers-panel__tab--selected' : ''}`,
+    text: `Block ${Number(block.height).toLocaleString()}`,
+    attributes: {
+      id: `block-tab-${block.hash}`,
+      type: 'button',
+      role: 'tab',
+      title: block.hash,
+      'aria-selected': selected ? 'true' : 'false',
+      'aria-controls': 'explorer-data-content'
+    }
+  });
+  listen(button, 'click', () => selectBlock(block));
+  listen(button, 'keydown', (event) => {
+    const tabs = Array.from(event.currentTarget.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+    const index = tabs.indexOf(event.currentTarget);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    tabs[next]?.focus();
+    tabs[next]?.click();
+  });
+  const closeButton = element('button', {
+    key: `block-tab:${block.hash}:close`,
+    className: 'block-data-tab__close',
+    text: '×',
+    attributes: {
+      type: 'button',
+      'aria-label': `Close block ${Number(block.height).toLocaleString()}`,
+      title: 'Close tab'
+    }
+  });
+  listen(closeButton, 'click', () => closeBlockTab(block.hash));
+
+  return element('div', {
+    key: `block-tab:${block.hash}:group`,
+    className: `block-data-tab${selected ? ' block-data-tab--selected' : ''}`,
+    attributes: { role: 'presentation' }
+  }, [button, closeButton]);
+}
+
+const configActionFields = ['verb', 'target-addresses', 'target-peers', 'target-priority-peers'];
+
+async function saveConfig() {
+  if (!explorerState.configDraft || explorerState.configSaving) return;
+  const values = {};
+  explorerState.configSaveError = null;
+  for (const name of configActionFields) {
+    if (name === 'verb') {
+      values[name] = explorerState.configDraft.verb;
+      continue;
+    }
+    const input = explorerState.configDraft[name].trim();
+    if (!input) {
+      values[name] = explorerState.config[name];
+    } else {
+      if (!/^[0-9]+$/.test(input) || !Number.isSafeInteger(Number(input))) {
+        explorerState.configSaveError = 'Targets must be non-negative whole numbers within the supported range.';
+        renderExplorer();
+        return;
+      }
+      values[name] = Number(input);
+    }
+  }
+  explorerState.configSaving = true;
+  renderExplorer();
+  try {
+    const response = await sendActions([
+      makeBitcoinClientAction('configure', configActionFields.map((name) => ({ [name]: values[name] })))
+    ]);
+    if (!response.ok) throw new Error('Unable to save configuration. Please try again.');
+    explorerState.configDraft = null;
+  } catch (error) {
+    explorerState.configSaveError = error.message;
+  } finally {
+    explorerState.configSaving = false;
+    renderExplorer();
+  }
+}
+
+function ConfigPanel(state) {
+  const editing = state.configDraft !== null;
+  const button = (label, onClick, type = 'button') => {
+    const control = element('button', {
+      key: `config:${label}`, className: 'peer-card__disconnect', text: label,
+      attributes: { type, ...(state.configSaving ? { disabled: '' } : {}) }
+    });
+    if (onClick) listen(control, 'click', onClick);
+    return control;
+  };
+  const controls = editing ? [
+    button('Cancel', () => {
+      explorerState.configDraft = null;
+      explorerState.configSaveError = null;
+      renderExplorer();
+    }),
+    button(state.configSaving ? 'Saving…' : 'Save', null, 'submit')
+  ] : [button('Edit', () => {
+    explorerState.configDraft = Object.fromEntries(configActionFields.map((name) => [
+      name, name === 'verb' ? state.config.verb === true : String(state.config[name])
+    ]));
+    explorerState.configSaveError = null;
+    renderExplorer();
+  })];
+  const form = element('form', { key: 'config-panel:form' }, [
+    state.config && element('div', {
+      key: 'config-panel:controls', className: 'config-panel__controls'
+    }, controls),
+    state.configSaveError && element('p', {
+      key: 'config-panel:error', className: 'peer-ban-form__error',
+      text: state.configSaveError, attributes: { role: 'alert' }
+    }),
+    state.config
+      ? element('dl', { key: 'config-panel:fields', className: 'config-panel__fields' },
+          configActionFields.map((name) => {
+            const value = state.config[name];
+            const formatted = name === 'verb' ? (value ? 'on' : 'off') : String(value);
+            const label = name === 'verb' ? 'verbosity' : name.replaceAll('-', ' ');
+            const input = !editing ? null : name === 'verb' ? element('button', {
+              key: 'config:verb:toggle',
+              className: 'peer-card__disconnect',
+              text: state.configDraft.verb ? 'on' : 'off',
+              attributes: {
+                type: 'button', role: 'switch', 'aria-label': 'Verbosity',
+                'aria-checked': String(state.configDraft.verb),
+                ...(state.configSaving ? { disabled: '' } : {})
+              }
+            }) : element('input', {
+              key: `config:${name}:input`,
+              attributes: {
+                type: 'text', value: state.configDraft[name], placeholder: formatted,
+                'aria-label': label,
+                ...(name !== 'verb' ? { inputmode: 'numeric' } : {}),
+                ...(state.configSaving ? { disabled: '' } : {})
+              }
+            });
+            if (input && name === 'verb') listen(input, 'click', () => {
+              explorerState.configDraft.verb = !explorerState.configDraft.verb;
+              renderExplorer();
+            });
+            else if (input) listen(input, 'input', (event) => {
+              explorerState.configDraft[name] = event.currentTarget.value;
+            });
+            return element('div', {
+              key: `config:${name}`, className: 'config-panel__field'
+            }, [
+              element('dt', { text: label }),
+              editing ? element('dd', {}, [input]) : element('dd', { text: formatted })
+            ]);
+          }))
+      : element('p', {
+          key: 'config-panel:status', text: 'Loading configuration…',
+          attributes: { role: 'status' }
+        })
+  ]);
+  listen(form, 'submit', (event) => {
+    event.preventDefault();
+    saveConfig();
+  });
+  return element('section', {
+    key: 'config-panel', className: 'config-panel',
+    attributes: { role: 'tabpanel', 'aria-labelledby': 'peers-panel-tab-config' }
+  }, [form]);
+}
+
 function ExplorerApp(state) {
-  const blockData = state.selectedBlock
-    ? state.blocks.get(state.selectedBlock.hash)
+  const selectedBlock = getSelectedBlock(state);
+  const blockData = selectedBlock
+    ? state.blocks.get(selectedBlock.hash)
     : null;
 
   return element('main', {
@@ -2559,23 +3138,44 @@ function ExplorerApp(state) {
         })
       ])
     ]),
-    BlockHeaderPanel(visibleHeaders(state), state.selectedBlock),
-    element('div', {
+    BlockHeaderPanel(visibleHeaders(state), selectedBlock),
+    element('section', {
       key: 'explorer-lower-region',
-      className: 'explorer__lower-region'
+      className: 'panel explorer-data-panel',
+      attributes: { 'aria-label': 'Explorer data' }
     }, [
-      PeersPanel(
-        state.peers,
-        state.addresses,
-        state.blacklist,
-        state.peerPanelTab
-      ),
-      BlockDataPanel(
-        state.selectedBlock,
-        blockData,
-        state.transactionPage,
-        state.bestBlock
-      )
+      element('header', {
+        key: 'explorer-data-tabs',
+        className: 'explorer-data-panel__tabs'
+      }, [
+        element('div', {
+          key: 'network-tabs',
+          className: 'peers-panel__tabs',
+          attributes: { role: 'tablist', 'aria-label': 'Network data' }
+        }, [
+          PeerPanelTab('peers', 'Peers'),
+          PeerPanelTab('addresses', 'Addresses'),
+          PeerPanelTab('blacklist', 'Blacklist'),
+          PeerPanelTab('config', 'Config')
+        ]),
+        element('div', {
+          key: 'block-tabs',
+          className: 'peers-panel__tabs explorer-data-panel__block-tabs',
+          attributes: { role: 'tablist', 'aria-label': 'Open blocks' }
+        }, Array.from(state.openBlocks.values(), (block) => BlockDataTab(block, state)))
+      ]),
+      element('div', {
+        key: 'explorer-data-content',
+        attributes: { id: 'explorer-data-content' }
+      }, [selectedBlock
+        ? BlockDataPanel(
+            selectedBlock, blockData,
+            state.blockTransactionPages.get(selectedBlock.hash) ?? 0, state.bestBlock
+          )
+        : state.selectedTab.type === 'config'
+          ? ConfigPanel(state)
+          : PeersPanel(state.peers, state.addresses, state.blacklist, state.selectedTab.type)
+      ])
     ])
   ]);
 }
