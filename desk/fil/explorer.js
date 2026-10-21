@@ -12,6 +12,8 @@ let bestBlockPollInFlight = false;
 let bestFilterHeaderPollTimer = null;
 let bestFilterHeaderPollInFlight = false;
 let headerViewedFrame = null;
+let networkPanelFrame = null;
+const dirtyNetworkTabs = new Set();
 
 const explorerState = {
   network: null,
@@ -179,6 +181,7 @@ function cachePeer(address, info) {
   const key = peerKey(address);
   explorerState.peers ??= new Map();
   explorerState.peers.set(key, { key, address, info });
+  if (!explorerState.peerConnectAddress.trim() || !explorerState.peerConnectPort.trim()) return;
   try {
     const enteredAddress = parsePeerIp(explorerState.peerConnectAddress);
     const port = explorerState.peerConnectPort.trim();
@@ -193,6 +196,24 @@ function cachePeer(address, info) {
   } catch {
     // Incomplete form input does not identify a peer yet.
   }
+}
+
+function scheduleNetworkPanelRender(tabs) {
+  for (const tab of tabs) dirtyNetworkTabs.add(tab);
+  if (networkPanelFrame !== null) return;
+  networkPanelFrame = requestAnimationFrame(() => {
+    networkPanelFrame = null;
+    const tab = explorerState.selectedTab.type;
+    const needsRender = dirtyNetworkTabs.has(tab);
+    dirtyNetworkTabs.clear();
+    if (!needsRender) return;
+
+    const panel = document.querySelector('[data-render-key="peers-panel"]');
+    if (!panel) return;
+    reconcileNode(panel, PeersPanel(
+      explorerState.peers, explorerState.addresses, explorerState.blacklist, tab
+    ));
+  });
 }
 
 function handlePeers(peersUpdate) {
@@ -231,7 +252,7 @@ function handlePeers(peersUpdate) {
   for (const key of explorerState.pendingPeerConnects) {
     if (explorerState.peers?.has(key)) explorerState.pendingPeerConnects.delete(key);
   }
-  renderExplorer();
+  scheduleNetworkPanelRender(['peers', 'addresses']);
 }
 
 function cacheAddress(address, info) {
@@ -258,7 +279,13 @@ function handleAddresses(addressesUpdate) {
     return;
   }
 
-  renderExplorer();
+  for (const key of explorerState.addressSettingsOpen) {
+    if (!explorerState.addresses?.has(key)) explorerState.addressSettingsOpen.delete(key);
+  }
+  for (const key of explorerState.addressBanForms.keys()) {
+    if (!explorerState.addresses?.has(key)) explorerState.addressBanForms.delete(key);
+  }
+  scheduleNetworkPanelRender(['addresses']);
 }
 
 function cacheBlacklistEntry(address, info) {
@@ -291,7 +318,10 @@ function handleBlacklist(blacklistUpdate) {
       explorerState.blacklistSettingsOpen.delete(key);
     }
   }
-  renderExplorer();
+  for (const key of explorerState.blacklistSettingsOpen) {
+    if (!explorerState.blacklist?.has(key)) explorerState.blacklistSettingsOpen.delete(key);
+  }
+  scheduleNetworkPanelRender(['blacklist']);
 }
 
 function handleIsSynced(isSynced) {
@@ -2471,7 +2501,7 @@ function AddressCard(entry, peer = null) {
     }, [BanControls(entry, removeButton, {
       drafts: explorerState.addressBanForms, prefix: 'address', label: 'Ban address'
     })]),
-    isSettingsOpen && connectButton,
+    isSettingsOpen && !isConnected && connectButton,
     settingsButton
   ]);
 }
@@ -2801,20 +2831,20 @@ function PeerConnectForm() {
 }
 
 function PeersPanel(peers, addresses, blacklist, activeTab) {
-  const visiblePeers = Array.from(peers?.values() ?? []).sort((first, second) => {
+  const visiblePeers = (activeTab === 'peers' ? Array.from(peers?.values() ?? []) : []).sort((first, second) => {
     const activeDifference = Number(second.info['handshake-done']) -
       Number(first.info['handshake-done']);
     return activeDifference || first.key.localeCompare(second.key);
   });
   const addressRankOrder = { priority: 0, known: 1, unknown: 2 };
-  const visibleAddresses = Array.from(addresses?.values() ?? [])
+  const visibleAddresses = activeTab === 'addresses' ? Array.from(addresses?.values() ?? [])
     .sort((first, second) => {
       const rankDifference = (addressRankOrder[first.info['address-rank']] ?? 2) -
         (addressRankOrder[second.info['address-rank']] ?? 2);
       return rankDifference || first.key.localeCompare(second.key);
-    });
-  const visibleBlacklist = Array.from(blacklist?.values() ?? [])
-    .sort((first, second) => first.key.localeCompare(second.key));
+    }) : [];
+  const visibleBlacklist = activeTab === 'blacklist' ? Array.from(blacklist?.values() ?? [])
+    .sort((first, second) => first.key.localeCompare(second.key)) : [];
   const activePeerCount = visiblePeers.filter(
     (peer) => peer.info['handshake-done']
   ).length;
