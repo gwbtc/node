@@ -14,9 +14,11 @@ let bestFilterHeaderPollInFlight = false;
 let headerViewedFrame = null;
 let networkPanelFrame = null;
 const dirtyNetworkTabs = new Set();
+let syncStatusRevision = 0;
 
 const explorerState = {
   network: null,
+  shipReconnecting: false,
   config: null,
   configDraft: null,
   configSaving: false,
@@ -127,6 +129,17 @@ async function connectToShip() {
   ]);
   eventSource = new EventSource(channelPath);
   eventSource.addEventListener('message', handleChannelStream);
+  eventSource.addEventListener('error', () => {
+    if (eventSource.readyState !== EventSource.CONNECTING || explorerState.shipReconnecting) return;
+    explorerState.shipReconnecting = true;
+    renderExplorer();
+  });
+  eventSource.addEventListener('open', () => {
+    refreshIsSynced();
+    if (!explorerState.shipReconnecting) return;
+    explorerState.shipReconnecting = false;
+    renderExplorer();
+  });
   updateBestFilterHeaderPolling();
 }
 
@@ -205,6 +218,10 @@ function scheduleNetworkPanelRender(tabs) {
     networkPanelFrame = null;
     const tab = explorerState.selectedTab.type;
     const needsRender = dirtyNetworkTabs.has(tab);
+    if (dirtyNetworkTabs.has('peers')) {
+      const status = document.querySelector('[data-render-key="status-module"]');
+      if (status) reconcileNode(status, StatusModule());
+    }
     dirtyNetworkTabs.clear();
     if (!needsRender) return;
 
@@ -325,6 +342,7 @@ function handleBlacklist(blacklistUpdate) {
 }
 
 function handleIsSynced(isSynced) {
+  syncStatusRevision++;
   const nextIsSynced = isSynced === true;
   const syncStatusChanged = explorerState.isSynced !== nextIsSynced;
   explorerState.isSynced = nextIsSynced;
@@ -381,6 +399,21 @@ function startBestBlockPolling() {
   pollBestBlock();
 }
 
+async function refreshIsSynced() {
+  const revision = syncStatusRevision;
+  try {
+    const response = await fetch(`${scryBasePath}/is-synced.json`);
+    if (!response.ok) return;
+    const synced = unwrapBitcoinClientUpdate(await response.json(), 'is-synced');
+    // A subscription update received during this request is more authoritative.
+    if (typeof synced === 'boolean' && revision === syncStatusRevision) {
+      handleIsSynced(synced);
+    }
+  } catch {
+    // Keep the subscription state; catch-up polling will retry.
+  }
+}
+
 async function pollBestBlock() {
   if (explorerState.isSynced || bestBlockPollInFlight) return;
 
@@ -402,6 +435,7 @@ async function pollBestBlock() {
   } catch {
     // A later poll will retry while the light client is still syncing.
   } finally {
+    await refreshIsSynced();
     bestBlockPollInFlight = false;
     scheduleBestBlockPoll();
   }
@@ -1504,13 +1538,43 @@ function BlockHeaderCard(header, selectedBlock) {
   return card;
 }
 
-function BlockHeaderPanel(headers, selectedBlock) {
+function StatusModule() {
   const networkConnected = hasNetworkConnection(explorerState);
   const syncStatus = !networkConnected
     ? 'unsynced'
     : explorerState.isSynced ? 'synced' : 'syncing';
   const syncStatusLabel = syncStatus.charAt(0).toUpperCase() +
     syncStatus.slice(1);
+  return element('div', {
+    key: 'status-module',
+    className: 'status-module',
+    attributes: {
+      role: 'status',
+      'aria-live': 'polite'
+    }
+  }, [
+    ...(explorerState.shipReconnecting ? [element('span', {
+      key: 'status-module:reconnecting',
+      className: 'status-module__item status-module__item--reconnecting',
+      text: 'Reconnecting to ship'
+    })] : [element('span', {
+      key: 'status-module:network',
+      className: `status-module__item status-module__item--network-${
+        networkConnected ? 'connected' : 'disconnected'
+      }`,
+      text: explorerState.network
+        ? `Bitcoin ${formatNetworkName(explorerState.network)}`
+        : 'Bitcoin Network'
+    }),
+    element('span', {
+      key: 'status-module:sync',
+      className: `status-module__item status-module__item--${syncStatus}`,
+      text: syncStatusLabel
+    })])
+  ]);
+}
+
+function BlockHeaderPanel(headers, selectedBlock) {
   const searchInput = element('input', {
     key: 'block-search-input',
     className: 'block-search',
@@ -1637,29 +1701,7 @@ function BlockHeaderPanel(headers, selectedBlock) {
       className: 'panel__header'
     }, [
       searchForm,
-      element('div', {
-        key: 'status-module',
-        className: 'status-module',
-        attributes: {
-          role: 'status',
-          'aria-live': 'polite'
-        }
-      }, [
-        element('span', {
-          key: 'status-module:network',
-          className: `status-module__item status-module__item--network-${
-            networkConnected ? 'connected' : 'disconnected'
-          }`,
-          text: explorerState.network
-            ? `Bitcoin ${formatNetworkName(explorerState.network)}`
-            : 'Bitcoin Network'
-        }),
-        element('span', {
-          key: 'status-module:sync',
-          className: `status-module__item status-module__item--${syncStatus}`,
-          text: syncStatusLabel
-        })
-      ])
+      StatusModule()
     ]),
     headerViewport
   ]);

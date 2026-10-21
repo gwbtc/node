@@ -89,11 +89,13 @@ dd {
 
 .status-module__item--network-disconnected::before,
 .status-module__item--unsynced::before,
-.status-module__item--syncing::before {
+.status-module__item--syncing::before,
+.status-module__item--reconnecting::before {
   background: #d87580;
 }
 
-.status-module__item--syncing::before {
+.status-module__item--syncing::before,
+.status-module__item--reconnecting::before {
   animation: sync-status-pulse 1.25s ease-in-out infinite;
 }
 
@@ -1432,7 +1434,8 @@ input[type="checkbox"] {
   .block-header-card__loading-dot,
   .block-data-loading__spinner,
   .peer-card__disconnect-spinner,
-  .status-module__item--syncing::before {
+  .status-module__item--syncing::before,
+  .status-module__item--reconnecting::before {
     animation: none;
   }
 }
