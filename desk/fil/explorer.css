@@ -834,6 +834,10 @@ dd {
   gap: 8px;
 }
 
+.peer-card .peer-ban-form__actions {
+  margin-bottom: 2.25rem;
+}
+
 .peer-ban-form__fields {
   display: grid;
   align-content: start;
@@ -1106,15 +1110,15 @@ dd {
 
 .block-data-panel__hash {
   min-width: 0;
-  overflow: hidden;
   color: var(--explorer-text);
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   user-select: all;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .block-data-panel__copy {
   flex: none;
+  width: calc(6ch + 16px);
   padding: 4px 7px;
   border: 1px solid var(--explorer-border);
   color: var(--explorer-secondary);
@@ -1389,7 +1393,7 @@ dd {
 
 @media (max-width: 800px) {
   .peers-panel__list {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   }
 }
 
@@ -1408,6 +1412,268 @@ dd {
   .block-detail-field {
     grid-template-columns: minmax(105px, 0.4fr) minmax(0, 1fr);
     gap: 12px;
+  }
+
+  .block-header-panel .panel__header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .block-search-form {
+    order: 1;
+    width: 100%;
+  }
+
+  .status-module {
+    margin-left: auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .explorer-data-panel__tabs {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .explorer-data-panel__tabs > .peers-panel__tabs {
+    flex: 1 1 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .peers-panel__tab {
+    flex: none;
+  }
+
+  .peers-panel__header {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .peers-panel__count {
+    flex: none;
+    margin-right: 0.25rem;
+    white-space: nowrap;
+  }
+
+  .peer-connect-form {
+    display: grid;
+    flex: 1 1 0;
+    grid-template-columns: minmax(0, 1fr) 6ch auto;
+    width: auto;
+    gap: 6px;
+  }
+
+  .peer-connect-form input {
+    width: 100%;
+  }
+
+  .peer-connect-form__error {
+    grid-column: 1 / -1;
+  }
+
+  input,
+  .block-search,
+  .peer-connect-form input,
+  .peer-ban-form__field input,
+  .config-panel__field input {
+    font-size: 0.875rem;
+  }
+
+  button {
+    min-height: 2.25rem;
+  }
+
+  .address-row__ban-button {
+    height: 25px;
+    min-height: 25px;
+  }
+
+  .address-row__connect {
+    margin-top: 0.375rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .blacklist-row__unban {
+    margin: 0.375rem 0;
+  }
+
+  .peer-card__settings {
+    display: inline-flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .peer-card {
+    height: 12.5rem;
+    overflow-y: auto;
+  }
+
+  .block-data-tab__close {
+    min-width: 2.25rem;
+  }
+
+  .address-row__controls > .peer-ban-form {
+    padding: 2px 6px;
+  }
+
+  .address-row__controls .peer-ban-form__field input {
+    height: 2.25rem;
+  }
+
+  .peers-panel__list.peers-panel__list--rows {
+    overflow-x: visible;
+  }
+
+  .address-row,
+  .blacklist-row {
+    position: relative;
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 3.25rem;
+    padding: 18px 4px;
+    gap: 10px 12px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .address-row,
+  .blacklist-row {
+    padding-right: 3rem;
+  }
+
+  .address-row .address-row__settings,
+  .blacklist-row .blacklist-row__settings {
+    position: absolute;
+    top: 8px;
+    right: 0;
+    margin-left: 0;
+  }
+
+  .address-row__type,
+  .blacklist-row__type {
+    flex-basis: auto;
+    margin-right: 0;
+  }
+
+  .address-row__value,
+  .blacklist-row__value {
+    flex: 1 1 14ch;
+    min-width: 0;
+  }
+
+  .address-row__source,
+  .blacklist-row__reason {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .address-row__value,
+  .address-row__source,
+  .blacklist-row__value,
+  .blacklist-row__reason {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .blacklist-row__when {
+    margin-left: 0;
+  }
+
+  .blacklist-row__when,
+  .blacklist-row__duration {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .address-row__controls {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-left: 0;
+    white-space: normal;
+  }
+
+  .address-row__controls > .peer-ban-form {
+    width: 100%;
+    padding: 8px;
+  }
+
+  .address-row__controls .peer-ban-form,
+  .address-row__controls .peer-ban-form__actions,
+  .address-row__controls .peer-ban-form__fields {
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .address-row__controls .peer-ban-form__fields {
+    flex: 1 1 100%;
+  }
+
+  .address-row__controls .peer-ban-form__field {
+    flex: 1 1 10rem;
+    min-width: 0;
+  }
+
+  .address-row__controls .peer-ban-form__field input {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .address-row__controls .peer-ban-form__error {
+    white-space: normal;
+  }
+
+  .block-data-panel__header {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .block-data-panel__height {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .block-data-panel__hash-group {
+    grid-column: 1 / -1;
+  }
+
+  .block-details__section,
+  .block-transactions,
+  .config-panel {
+    padding: 16px;
+  }
+
+  .block-transactions__header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .transaction-card__summary {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .transaction-card__counts {
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .transaction-card__body {
+    padding: 12px;
+  }
+
+  .config-panel__field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
   }
 }
 

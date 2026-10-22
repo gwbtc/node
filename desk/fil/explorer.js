@@ -2837,7 +2837,7 @@ function PeerConnectForm() {
     key: 'peer-connect:address',
     className: 'peer-connect-form__address',
     attributes: {
-      type: 'text', placeholder: 'address', 'aria-label': 'Peer address',
+      type: 'text', placeholder: 'Address', 'aria-label': 'Peer address',
       value: explorerState.peerConnectAddress
     }
   });
@@ -2845,7 +2845,7 @@ function PeerConnectForm() {
     key: 'peer-connect:port',
     className: 'peer-connect-form__port',
     attributes: {
-      type: 'text', inputmode: 'numeric', placeholder: 'port', 'aria-label': 'Peer port',
+      type: 'text', inputmode: 'numeric', placeholder: 'Port', 'aria-label': 'Peer port',
       value: explorerState.peerConnectPort
     }
   });
