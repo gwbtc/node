@@ -1248,7 +1248,7 @@
   |=  syc=^header-sync-req
   ^-  card
   ?>  ?=(^ syc)
-  %.  when.u.syc
+  %.  (add when.u.syc header-sync-retry-interval.config)
   %~  end
       timer
   %+  weld
