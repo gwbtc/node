@@ -1677,6 +1677,7 @@
       |=  [erp=earth-address ard=earth-address-info]
       ?|  ?=(%priority address-rank.ard)
           ?=(%userspace -.address-provenance.ard)
+          (~(has by earth-peers) erp)
       ==
     =.  replaceable-addrs
       %+  sort  replaceable-addrs
