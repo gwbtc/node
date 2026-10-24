@@ -211,6 +211,11 @@ function cachePeer(address, info) {
   }
 }
 
+function updateStatusModule() {
+  const status = document.querySelector('[data-render-key="status-module"]');
+  if (status) reconcileNode(status, StatusModule());
+}
+
 function scheduleNetworkPanelRender(tabs) {
   for (const tab of tabs) dirtyNetworkTabs.add(tab);
   if (networkPanelFrame !== null) return;
@@ -218,10 +223,6 @@ function scheduleNetworkPanelRender(tabs) {
     networkPanelFrame = null;
     const tab = explorerState.selectedTab.type;
     const needsRender = dirtyNetworkTabs.has(tab);
-    if (dirtyNetworkTabs.has('peers')) {
-      const status = document.querySelector('[data-render-key="status-module"]');
-      if (status) reconcileNode(status, StatusModule());
-    }
     dirtyNetworkTabs.clear();
     if (!needsRender) return;
 
@@ -235,6 +236,7 @@ function scheduleNetworkPanelRender(tabs) {
 
 function handlePeers(peersUpdate) {
   if (!peersUpdate || typeof peersUpdate.type !== 'string') return;
+  const wasNetworkConnected = hasNetworkConnection(explorerState);
 
   if (peersUpdate.type === 'all') {
     explorerState.peers = new Map();
@@ -268,6 +270,10 @@ function handlePeers(peersUpdate) {
 
   for (const key of explorerState.pendingPeerConnects) {
     if (explorerState.peers?.has(key)) explorerState.pendingPeerConnects.delete(key);
+  }
+  if (wasNetworkConnected !== hasNetworkConnection(explorerState)) {
+    updateStatusModule();
+    refreshIsSynced();
   }
   scheduleNetworkPanelRender(['peers', 'addresses']);
 }
@@ -357,6 +363,7 @@ function handleIsSynced(isSynced) {
 
   updateBestFilterHeaderPolling();
   if (syncStatusChanged) renderExplorer();
+  else updateStatusModule();
 }
 
 function subscribeToBestBlock() {
@@ -1221,7 +1228,7 @@ async function disconnectPeer(peer) {
       ? null
       : new Date(ban.expiration).getTime() - Date.now();
     if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
-      ban.error = 'Choose a future expiration time or select No expiration.';
+      ban.error = 'Invalid time.';
       renderExplorer();
       return;
     }
@@ -1912,6 +1919,25 @@ function TransactionPaginationButton(key, label, text, disabled, onClick) {
   return button;
 }
 
+function TransactionsHeader(blockHash, count = null) {
+  return element('header', {
+      key: `block:${blockHash}:transactions:header`,
+      className: 'block-transactions__header'
+    }, [
+      element('h3', {
+        key: `block:${blockHash}:transactions:title`,
+        className: 'block-transactions__title',
+        text: 'Transactions',
+        attributes: { id: 'block-transactions-title' }
+      }),
+      element('span', {
+        key: `block:${blockHash}:transactions:count`,
+        className: 'block-transactions__count',
+        text: count === null ? '' : String(count)
+      })
+    ]);
+}
+
 function TransactionList(transactions, currentPage, blockHash) {
   const pageCount = Math.max(
     1,
@@ -1929,22 +1955,7 @@ function TransactionList(transactions, currentPage, blockHash) {
     className: 'block-transactions',
     attributes: { 'aria-labelledby': 'block-transactions-title' }
   }, [
-    element('header', {
-      key: `block:${blockHash}:transactions:header`,
-      className: 'block-transactions__header'
-    }, [
-      element('h3', {
-        key: `block:${blockHash}:transactions:title`,
-        className: 'block-transactions__title',
-        text: 'Transactions',
-        attributes: { id: 'block-transactions-title' }
-      }),
-      element('span', {
-        key: `block:${blockHash}:transactions:count`,
-        className: 'block-transactions__count',
-        text: String(transactions.length)
-      })
-    ]),
+    TransactionsHeader(blockHash, transactions.length),
     element('div', {
       key: `block:${blockHash}:transaction-list`,
       className: 'transaction-list'
@@ -1981,23 +1992,29 @@ function TransactionList(transactions, currentPage, blockHash) {
 }
 
 function BlockLoadingIndicator(blockHash) {
-  return element('div', {
-    key: `block:${blockHash}:loading`,
-    className: 'block-data-loading',
-    attributes: {
-      role: 'status',
-      'aria-live': 'polite'
-    }
+  const dots = Array.from({ length: 4 }, (_, index) => [index, 0]);
+  return element('section', {
+    key: `block:${blockHash}:transactions`,
+    className: 'block-transactions',
+    attributes: { 'aria-labelledby': 'block-transactions-title' }
   }, [
-    element('span', {
-      key: `block:${blockHash}:loading:spinner`,
-      className: 'block-data-loading__spinner',
+    TransactionsHeader(blockHash),
+    element('div', {
+      key: `block:${blockHash}:loading`,
+      className: 'block-data-loading',
+      attributes: { role: 'status', 'aria-label': 'Loading transactions' }
+    }, [element('span', {
+      key: `block:${blockHash}:loading:dots`,
+      className: 'block-data-loading__dots',
       attributes: { 'aria-hidden': 'true' }
-    }),
-    element('span', {
-      key: `block:${blockHash}:loading:label`,
-      text: 'Loading transactions…'
-    })
+    }, dots.map(([column, row], index) => element('span', {
+      key: `block:${blockHash}:loading:dot:${index}`,
+      className: 'block-data-loading__dot',
+      text: '■',
+      attributes: {
+        style: `grid-column: ${column + 1}; grid-row: ${row + 1}; animation-delay: ${index * 0.15 - 0.6}s`
+      }
+    })))])
   ]);
 }
 
@@ -2686,7 +2703,7 @@ function PeerPanelEmpty(tab, source, emptyText) {
     }),
     element('p', {
       key: `peers-panel:${tab}:empty:copy`,
-      text: source === null ? 'Waiting for data…' : emptyText
+      text: source === null ? 'No peers connected.' : emptyText
     })
   ]);
 }

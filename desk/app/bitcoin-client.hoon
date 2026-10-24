@@ -61,6 +61,7 @@
       =earth-peers
       =earth-addresses
       =earth-blacklist
+      next-blacklist-timer=time
       =pending-block-hash-reqs
       =pending-block-height-reqs
       =header-sync-req
@@ -819,8 +820,8 @@
       %+  ~(put by acc)
           key
           val
+    =.  cor  schedule-blacklist-cleanup
     %-  emil
-    :-  set-blacklist-cleanup-timer
         caz
   ::
       [%explorer %file-update ~]
@@ -1156,6 +1157,12 @@
   ::
   --
 ::
+++  schedule-blacklist-cleanup
+  ^+  cor
+  =.  next-blacklist-timer  (add now.bowl blacklist-cleanup-interval.config)
+  %-  emit
+      set-blacklist-cleanup-timer
+::
 ++  timer
   |_  wir=wire
   ++  set
@@ -1191,6 +1198,13 @@
   ^-  card
   %.  blacklist-cleanup-interval.config
   %~  set
+      timer
+      /timer/blacklist-cleanup
+::
+++  end-blacklist-cleanup-timer
+  ^-  card
+  %.  next-blacklist-timer
+  %~  end
       timer
       /timer/blacklist-cleanup
 ::
@@ -2597,7 +2611,7 @@
   =*  het  block-height.val
   =*  wok  chainwork.val
   =.  config  init-config
-  =.  cor  (emit set-blacklist-cleanup-timer)
+  =.  cor  schedule-blacklist-cleanup
   %_  cor
       services       services(node-witness &)
   ::
@@ -2622,13 +2636,35 @@
   ?>       ?=(%2 -.old)
   =.  state  old
   =.  cor  connect-to-more-peers
+  =.  cor  (emit end-blacklist-cleanup-timer)
+  =.  cor  schedule-blacklist-cleanup
   cor
 ::
 ++  state-1-to-2
   |=  [%1 old=state-1]
   :-  %2
   ^-  state-2
-  old
+  :*  network.old
+      protocol-version.old
+      services.old
+      init-config
+      earth-peers.old
+      earth-addresses.old
+      earth-blacklist.old
+      *@da
+      pending-block-hash-reqs.old
+      pending-block-height-reqs.old
+      header-sync-req.old
+      tx-inv-broadcast-queue.old
+      tx-broadcast-cache.old
+      best-block.old
+      bh-index.old
+      best-filter-header.old
+      filter-headers.old
+      filter-cache.old
+      block-headers.old
+      block-cache.old
+  ==
 ::
 ++  state-0-to-1
   |=  [%0 old=state-0]
