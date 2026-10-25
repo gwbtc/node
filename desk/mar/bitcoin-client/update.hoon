@@ -99,9 +99,8 @@
       ['tx-inv-broadcast-retry-interval' (decimal (en-earth-duration-milliseconds tx-inv-broadcast-retry-interval.fig))]
       ['tx-broadcast-cache-expiration' (decimal (en-earth-duration-milliseconds tx-broadcast-cache-expiration.fig))]
       ['blacklist-cleanup-interval' (decimal (en-earth-duration-milliseconds blacklist-cleanup-interval.fig))]
-      ['filter-cache-max-size' (decimal filter-cache-max-size.fig)]
-      ['block-cache-max-size' (decimal block-cache-max-size.fig)]
-      ['percent-of-cache-size-to-prune' (decimal percent-of-cache-size-to-prune.fig)]
+      ['filter-cache-range' (decimal filter-cache-range.fig)]
+      ['block-cache-range' (decimal block-cache-range.fig)]
   ==
 ::
 ++  best-block-json

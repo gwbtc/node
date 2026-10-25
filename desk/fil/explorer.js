@@ -2461,7 +2461,7 @@ async function removeAddress(entry) {
       ? null
       : new Date(ban.expiration).getTime() - Date.now();
     if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
-      ban.error = 'Choose a future expiration time or select No expiration.';
+      ban.error = 'Invalid time.';
       renderExplorer();
       return;
     }
@@ -3120,7 +3120,10 @@ function BlockDataTab(block, state) {
   }, [button, closeButton]);
 }
 
-const configActionFields = ['verb', 'target-addresses', 'target-peers', 'target-priority-peers'];
+const configActionFields = [
+  'verb', 'target-addresses', 'target-peers', 'target-priority-peers',
+  'filter-cache-range', 'block-cache-range'
+];
 
 async function saveConfig() {
   if (!explorerState.configDraft || explorerState.configSaving) return;
@@ -3136,7 +3139,7 @@ async function saveConfig() {
       values[name] = explorerState.config[name];
     } else {
       if (!/^[0-9]+$/.test(input) || !Number.isSafeInteger(Number(input))) {
-        explorerState.configSaveError = 'Targets must be non-negative whole numbers within the supported range.';
+        explorerState.configSaveError = 'Targets and cache ranges must be non-negative whole numbers within the supported range.';
         renderExplorer();
         return;
       }
@@ -3196,7 +3199,10 @@ function ConfigPanel(state) {
           configActionFields.map((name) => {
             const value = state.config[name];
             const formatted = name === 'verb' ? (value ? 'on' : 'off') : String(value);
-            const label = name === 'verb' ? 'verbosity' : name.replaceAll('-', ' ');
+            const label = name === 'verb' ? 'verbosity'
+              : name === 'block-cache-range' || name === 'filter-cache-range'
+                ? `${name.replaceAll('-', ' ')} from best block`
+                : name.replaceAll('-', ' ');
             const input = !editing ? null : name === 'verb' ? element('button', {
               key: 'config:verb:toggle',
               className: 'peer-card__disconnect',

@@ -73,6 +73,8 @@
           target-addresses+ni
           target-peers+ni
           target-priority-peers+ni
+          filter-cache-range+ni
+          block-cache-range+ni
       ==
     --
   --

@@ -18,9 +18,8 @@
       tx-inv-broadcast-retry-interval=@dr
       tx-broadcast-cache-expiration=@dr
       blacklist-cleanup-interval=@dr
-      filter-cache-max-size=@ud
-      block-cache-max-size=@ud
-      percent-of-cache-size-to-prune=@ud
+      filter-cache-range=@ud
+      block-cache-range=@ud
   ==
 ::
 +$  bitcoin-client-action
@@ -72,6 +71,8 @@
       [%target-addresses p=@ud]
       [%target-peers p=@ud]
       [%target-priority-peers p=@ud]
+      [%filter-cache-range p=@ud]
+      [%block-cache-range p=@ud]
   ==
 ::
 ++  update

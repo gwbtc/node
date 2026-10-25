@@ -49,9 +49,9 @@
 ::
 +$  best-filter-header  [=block-height =block-hash]
 +$  filter-headers      (map block-hash filter-header:b-fil)
-+$  filter-cache        [size=@ud dat=(map block-hash filter:b-fil)]
++$  filter-cache        (map block-height filter:b-fil)
 ::
-+$  block-cache         [size=@ud dat=(map block-hash hexb)]
++$  block-cache         (map block-height block)
 ::
 +$  state-2
   $:  =network:b-net
@@ -83,7 +83,7 @@
     $:  =network:b-net
         =protocol-version:b-net
         =services:b-net
-        =config
+        config=*
         =earth-peers
         =earth-addresses
         =earth-blacklist
@@ -100,6 +100,8 @@
         =block-headers
         =block-cache
     ==
+  +$  filter-cache  [size=@ud dat=(map block-hash filter:b-fil)]
+  +$  block-cache   [size=@ud dat=(map block-hash hexb)]
   --
 ::
 ++  state-0
@@ -187,7 +189,6 @@
     ~&  >    [%headers ~(wyt in block-headers)]
     ~&  >>   [%best-filter-header best-filter-header]
     ~&  >>   [%filter-headers ~(wyt in filter-headers)]
-    ~&  >>   [%filter-cache ~(wyt in dat.filter-cache)]
     ~&  >>>  [%pending-block-hash-reqs pending-block-hash-reqs]
     ~&  >>>  [%pending-block-height-reqs pending-block-height-reqs]
     ~&  >>>  [%tx-inv-broadcast-queue (lent tx-inv-broadcast-queue)]
@@ -196,9 +197,9 @@
     ~&   >   [%earth-blacklist ~(wyt in earth-blacklist)]
     ~&   >   [%total-earth-peers ~(wyt in earth-peers)]
     ~&   >   [%live-earth-peers (lent (skim ~(tap by earth-peers) |=([k=earth-address v=earth-peer-state] handshake-done.v)))]
-    ~&  >>   [%priority-peers get-priority-peer-count]
-    ~&  >>>  [%filter-cache-size size.filter-cache]
-    ~&  >>>  [%block-cache-size size.block-cache]
+    ~&   >   [%priority-peers get-priority-peer-count]
+    ~&  >>   [%filter-cache ~(wyt in filter-cache)]
+    ~&  >>   [%block-cache ~(wyt in block-cache)]
     cor
   ::
   ?:  ?=(%bitcoin-client-connect-peer mak)          :: TODO: remove this once the boot script no longer needs it
@@ -296,10 +297,64 @@
     =*  fig  i.p.act
     =.  cor
       ?-  -.fig
+      ::
           %verb                   cor(verb.config p.fig)
           %target-addresses       cor(target-addresses.config p.fig)
-          %target-peers           cor(target-peers.config p.fig)
           %target-priority-peers  cor(target-priority-peers.config p.fig)
+          %target-peers
+        ?:  (lte p.fig target-peers.config)
+          %_  cor
+              target-peers.config  p.fig
+          ==
+        =.  target-peers.config  p.fig
+        connect-to-more-peers
+      ::
+          %filter-cache-range
+        ?:  (gte p.fig filter-cache-range.config)
+          %_  cor
+              filter-cache-range.config  p.fig
+          ==
+        ?:  =(0 p.fig)
+          %_  cor
+              filter-cache-range.config  p.fig
+              filter-cache               ~
+          ==
+        =/  het  (sub block-height.best-block (dec filter-cache-range.config))
+        =/  num  (sub filter-cache-range.config p.fig)
+        |-
+        ?:  =(0 num)
+          %_  cor
+              filter-cache-range.config  p.fig
+          ==
+        %=  $
+            num           (dec num)
+            het           +(het)
+            filter-cache  (~(del by filter-cache) het)
+        ==
+      ::
+          %block-cache-range
+        ?:  (gte p.fig block-cache-range.config)
+          %_  cor
+              block-cache-range.config  p.fig
+          ==
+        ?:  =(0 p.fig)
+          %_  cor
+              block-cache-range.config  p.fig
+              block-cache               ~
+          ==
+        =/  het  (sub block-height.best-block (dec block-cache-range.config))
+        =/  num  (sub block-cache-range.config p.fig)
+        |-
+        ?:  =(0 num)
+          %_  cor
+              block-cache-range.config  p.fig
+          ==
+        %=  $
+            num          (dec num)
+            het          +(het)
+            block-cache  (~(del by block-cache) het)
+        ==
+      ::
       ==
     %=  $
         p.act  t.p.act
@@ -520,7 +575,7 @@
       %-  emil
       %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
           ~
-    =/  fil  (~(get by dat.filter-cache) haz)
+    =/  fil  (~(get by filter-cache) block-height.u.hed)
     ?^  fil
       %-  emil
       %-  ~(res ~(block-filter-by-hash make-update ~^src.bowl) haz)
@@ -547,7 +602,7 @@
     ?:  (lte het block-height.best-block)
       =/  haz  (got:on-bh-index bh-index het)
       =/  hed  (~(got by block-headers) haz)
-      =/  fil  (~(get by dat.filter-cache) haz)
+      =/  fil  (~(get by filter-cache) het)
       ?^  fil
         %-  emil
         %-  ~(res ~(block-filter-by-height make-update ~^src.bowl) het)
@@ -585,7 +640,16 @@
       %-  emil
       %-  ~(res ~(block-by-hash make-update ~^src.bowl) haz)
           ~
-    :: TODO: check block cache
+    =/  bok  (~(get by block-cache) block-height.u.hed)
+    ?^  bok
+      %-  emil
+      %-  ~(res ~(block-by-hash make-update ~^src.bowl) haz)
+      :_  u.bok
+      %:  make-block-info
+          block-height.u.hed
+          haz
+          chainwork.u.hed
+      ==
     =/  req  [%block ~]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
@@ -603,7 +667,16 @@
     ?:  (lte het block-height.best-block)
       =/  haz  (got:on-bh-index bh-index het)
       =/  hed  (~(got by block-headers) haz)
-      :: TODO: check block cache
+      =/  bok  (~(get by block-cache) het)
+      ?^  bok
+        %-  emil
+        %-  ~(res ~(block-by-height make-update ~^src.bowl) het)
+        :_  u.bok
+        %:  make-block-info
+            block-height.hed
+            haz
+            chainwork.hed
+        ==
       =/  req  [%block ~]
       ?:  (~(has ju pending-block-height-reqs) het req)  cor
       =.  pending-block-height-reqs  (~(put ju pending-block-height-reqs) het req)
@@ -944,6 +1017,19 @@
   ?~  taz  |
   .=  haz
       u.taz
+::
+++  height-is-in-cache-range
+  |=  [het=@ud range=@ud]
+  ^-  ?
+  ?:  (gth het block-height.best-block)  |
+  ?:  =(0 range)  |
+  =.  range  (dec range)
+  %+  gte
+      het
+  ?:  (gte range block-height.best-block)  0
+  %+  sub
+      block-height.best-block
+      range
 ::
 ++  make-block-info
   |=  [het=block-height haz=block-hash wok=chainwork]
@@ -1972,8 +2058,11 @@
       %+  disconnect-peer
           ['block failed merkle root verification' ~^~d10]
           erp
+    =?  block-cache  (height-is-in-cache-range het block-cache-range.config)
+      %+  ~(put by block-cache)
+          het
+          bok
     :: update any subscriptions pending this block
-    :: TODO: cache block
     =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
     =.  cor
       |-
@@ -2101,12 +2190,10 @@
       %+  disconnect-peer
           ['cfilter failed verification' ~^~d10]
           erp
-    :: cache the block filter
-    =.  filter-cache
-      %_  filter-cache
-          size  (add size.filter-cache wid.fil)
-          dat   (~(put by dat.filter-cache) haz fil)
-      ==
+    =?  filter-cache  (height-is-in-cache-range het filter-cache-range.config)
+      %+  ~(put by filter-cache)
+          het
+          fil
     :: update any subscriptions pending this block filter
     =/  hash-reqs  ~(tap in (~(get ju pending-block-hash-reqs) haz))
     =.  cor
@@ -2311,6 +2398,20 @@
             :+  %new
                 het
                 haz
+          =.  filter-cache
+            ?:  =(0 filter-cache-range.config)  ~
+            ?:  (gth filter-cache-range.config block-height.best-block)  filter-cache
+            %-  ~(del by filter-cache)
+            %+  sub
+                block-height.best-block
+                filter-cache-range.config
+          =.  block-cache
+            ?:  =(0 block-cache-range.config)  ~
+            ?:  (gth block-cache-range.config block-height.best-block)  block-cache
+            %-  ~(del by block-cache)
+            %+  sub
+                block-height.best-block
+                block-cache-range.config
           =/  height-reqs  ~(tap in (~(get ju pending-block-height-reqs) het))
           =.  cor
             |-
@@ -2355,6 +2456,7 @@
       :: - roll back bh-index to the last common block,
       ::   and graft on the new best branch.
       :: - handle changing the best-filter-header
+      :: - clear affected block and filter cache entries
       :: - update affected subscriptions
       ::
       =/  new-best-block  `^best-block`[haz het wok]
@@ -2405,7 +2507,7 @@
             bh-index
             new-best-branch
       =.  best-block  new-best-block
-      =.  best-filter-header                                  :: TODO: on reorg, delete any cached filters (and blocks) from the stale branch
+      =.  best-filter-header
         =/  las  last-common-block
         |-
         =/  fed  (~(get by filter-headers) block-hash.las)
@@ -2416,6 +2518,15 @@
         ?~  nax  best-filter-header
         %=  $
             las  [nex u.nax]
+        ==
+      =.  cor
+        =/  sal  (tap:on-bh-index stale-branch)
+        |-
+        ?~  sal  cor
+        %=  $
+            sal           t.sal
+            filter-cache  (~(del by filter-cache) key.i.sal)
+            block-cache   (~(del by block-cache) key.i.sal)
         ==
       =.  cor
         %-  emit
@@ -2591,9 +2702,8 @@
       tx-inv-broadcast-retry-interval              ~s15
       tx-broadcast-cache-expiration                ~s30
       blacklist-cleanup-interval                   ~d1
-      filter-cache-max-size                        1.000.000.000
-      block-cache-max-size                         1.000.000.000
-      percent-of-cache-size-to-prune               25
+      filter-cache-range                           100.000
+      block-cache-range                            144
   ==
 ::
 ++  init
@@ -2661,9 +2771,9 @@
       bh-index.old
       best-filter-header.old
       filter-headers.old
-      filter-cache.old
+      ~
       block-headers.old
-      block-cache.old
+      ~
   ==
 ::
 ++  state-0-to-1
@@ -2714,7 +2824,7 @@
   :*  network.old
       protocol-version.old
       services.old
-      init-config
+      **
       new-earth-peers
       new-earth-addresses
       new-earth-blacklist
@@ -2727,9 +2837,9 @@
       bh-index.old
       best-filter-header.old
       filter-headers.old
-      *^filter-cache
+      *filter-cache:state-1
       block-headers.old
-      *^block-cache
+      *block-cache:state-1
   ==
 ::
 --
