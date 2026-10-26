@@ -592,7 +592,7 @@
     =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  (make-getcfilters-message block-height.u.hed haz)
     ==
@@ -619,7 +619,7 @@
       =/  som  (get-some-peer |)
       ?~  som  cor
       %-  emit
-      %+  send:tcp  u.som
+      %-  ~(send tcp u.som)
       %-  ~(write ne:b-ser network)
       :~  (make-getcfilters-message het haz)
       ==
@@ -657,7 +657,7 @@
     =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -684,7 +684,7 @@
       =/  som  (get-some-peer |)
       ?~  som  cor
       %-  emit
-      %+  send:tcp  u.som
+      %-  ~(send tcp u.som)
       %-  ~(write ne:b-ser network)
       :~  [%getdata [%msg-witness-block haz] ~]
       ==
@@ -714,7 +714,7 @@
     =/  som  (get-some-peer |)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -758,6 +758,58 @@
   ^+  cor
   ?+  wir  cor
   ::
+      [%tcp earth-peer=*]
+    ?.  ?=(%mach -.sin)  cor
+    =/  erp  (de-earth-peer-path earth-peer.wir)
+    =/  erd  (~(got by earth-peers) erp)
+    ?+  +<.sin  cor
+    ::
+        %received
+      =^  mes  buffer.erd  (~(read ne:b-ser network) octs.sin buffer.erd)
+      =?  last-heard.erd  .?(mes)  [~ now.bowl]
+      =.  cor  (update-peer erp erd)
+      |-
+      ?~  mes  cor
+      =.  cor
+        =+  (mole |.((handle-message erp i.mes)))
+        ?~  -
+            cor
+            u
+      %=  $
+          mes  t.mes
+      ==
+    ::
+        %connected
+      ~?  verb.config  [%tcp-connected erp]
+      %-  emil
+      :-  (set-peer-handshake-timeout-timer erp)
+      :_  ~
+      %-  ~(send tcp erp)
+      %-  ~(write ne:b-ser network)
+      :~  make-version-message
+      ==
+    ::
+        %closed
+      ~?  verb.config  [%tcp-closed erp p.sin]
+      ?-  -.p.sin
+      ::
+          %tls    (disconnect-peer ~ erp)
+          %peer   (disconnect-peer ~ erp)
+          %close  (disconnect-peer ~ erp)
+          %local  (disconnect-peer ~ erp)
+      ::
+          %connect
+        ?-  p.p.sin
+            %unresolved  (disconnect-peer ~ erp)
+            %invalid     (disconnect-peer ~ erp)
+            %refused     (disconnect-peer ['tcp error: refused' ~ ~d3] erp)
+            %timeout     (disconnect-peer ['tcp error: timeout' ~ ~d3] erp)
+        ==
+      ::
+      ==
+    ::
+    ==
+  ::
       [%timer %peer-handshake-timeout earth-peer=*]
     =/  erp  (de-earth-peer-path earth-peer.wir)
     =/  erd  (~(get by earth-peers) erp)
@@ -765,7 +817,7 @@
     ?.  ?=([%behn %wake *] sin)  cor
     ?:  handshake-done.u.erd  cor
     %+  disconnect-peer
-        ~  :: ['handshake timeout' ~^~d1]  :: TODO: this should ban, but the timer is currently armed early to catch local tcp-sidecar problems to clear stale peers
+        ['handshake timeout' ~ ~d1]
         erp
   ::
       [%timer %peer-ping earth-peer=*]
@@ -810,7 +862,7 @@
     =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -824,7 +876,7 @@
     =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  (make-getcfilters-message block-height.hed haz)
     ==
@@ -838,7 +890,7 @@
     =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  [%getdata [%msg-witness-block haz] ~]
     ==
@@ -853,7 +905,7 @@
     =/  som  (get-some-peer &)
     ?~  som  cor
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  (make-getcfilters-message het haz)
     ==
@@ -909,61 +961,7 @@
 ++  agent
   |=  [wir=(pole @ta) sin=sign:agent:gall]
   ^+  cor
-  ?+  wir  cor
-  ::
-      [%tcp earth-peer=*]
-    ?:  ?=(%kick -.sin)
-      =/  erp  (de-earth-peer-path earth-peer.wir)
-      =/  erd  (~(got by earth-peers) erp)
-      ~?  verb.config  [%tcp-kick erp]
-      %+  disconnect-peer
-          ~
-          erp
-    ?.  ?=(%fact -.sin)  cor
-    =/  erp  (de-earth-peer-path earth-peer.wir)
-    =/  erd  (~(got by earth-peers) erp)
-    =/  gif  !<(gift:tcp q.cage.sin)
-    ?-  -.gif
-    ::
-        %receive
-      =^  mes  buffer.erd  (~(read ne:b-ser network) data.gif buffer.erd)
-      =?  last-heard.erd  .?(mes)  ~^now.bowl
-      =.  cor  (update-peer erp erd)
-      |-
-      ?~  mes  cor
-      =.  cor
-        =+  (mole |.((handle-message erp i.mes)))
-        ?~  -
-            cor
-            u
-      %=  $
-          mes  t.mes
-      ==
-    ::
-        %connected
-      ~?  verb.config  [%tcp-connected erp]
-      %-  emit
-      %+  send:tcp  erp
-      %-  ~(write ne:b-ser network)
-      :~  make-version-message
-      ==
-    ::
-        %closed
-      ~?  verb.config  [%tcp-closed erp]
-      %+  disconnect-peer
-          ~
-          erp
-    ::
-        %error
-      ~?  verb.config  [%tcp-error erp msg.gif]
-      ?:  =('sidecar disconnected' msg.gif)  (disconnect-peer ~ erp)  :: TODO: remove this once tcp sidecar issues are resolved
-      %+  disconnect-peer
-          [(cat 3 'tcp error: ' msg.gif) ~^~d3]
-          erp
-    ::
-    ==
-  ::
-  ==
+  !!
 ::
   ::
 ::
@@ -1530,9 +1528,9 @@
         erp
     %-  make-earth-peer-info
         erd
-  %-  emil
-  :-  (set-peer-handshake-timeout-timer erp)  :: TODO: this should arm on confirmation of TCP connection,
-  %-  open:tcp                                :: but we arm it immediately to ensure potential stale peers are cleared as a result of local tcp-sidecar problems
+  %-  emit
+  %~  open
+      tcp
       erp
 ::
 ++  connect-to-more-peers
@@ -1574,7 +1572,7 @@
   =/  erd  (~(get by earth-peers) erp)
   ?~  erd  cor
   =.  earth-peers  (~(del by earth-peers) erp)
-  =.  cor  (emil (close:tcp erp))
+  =.  cor  (emit ~(close tcp erp))
   =.  cor
     ?^  ban  (blacklist-address erp ban)
     =/  ard  (~(got by earth-addresses) erp)
@@ -1675,7 +1673,7 @@
   %-  emil
   :-  (set-ping-timer erp)
   :_  ~
-  %+  send:tcp  erp
+  %-  ~(send tcp erp)
   %-  ~(write ne:b-ser network)
   :~  [%ping nun]
   ==
@@ -1697,7 +1695,7 @@
       %-  set-header-sync-retry-timer
           header-sync-req
     %-  emit
-    %+  send:tcp  u.som
+    %-  ~(send tcp u.som)
     %-  ~(write ne:b-ser network)
     :~  make-getcfheaders-message
     ==
@@ -1713,7 +1711,7 @@
     %-  set-header-sync-retry-timer
         header-sync-req
   %-  emit
-  %+  send:tcp  u.som
+  %-  ~(send tcp u.som)
   %-  ~(write ne:b-ser network)
   :~  [%getheaders make-block-locator ~]
   ==
@@ -1738,7 +1736,7 @@
       (set-tx-broadcast-cache-timer wid)
   %+  turn  pes
   |=  [erp=earth-address erd=earth-peer-state]
-  %+  send:tcp  erp
+  %-  ~(send tcp erp)
   %-  ~(write ne:b-ser network)
   =/  inv
     ?-  wtxidrelay.erd
@@ -1858,7 +1856,7 @@
   =/  som  (get-some-peer |)
   ?~  som  cor
   %-  emit
-  %+  send:tcp  u.som
+  %-  ~(send tcp u.som)
   %-  ~(write ne:b-ser network)
   :~  [%getaddr ~]
   ==
@@ -1893,7 +1891,7 @@
       ==
     =.  cor  (update-peer erp erd)
     %-  emit
-    %+  send:tcp  erp
+    %-  ~(send tcp erp)
     %-  ~(write ne:b-ser network)
     :~  [%sendheaders ~]
         [%sendaddrv2 ~]
@@ -1926,7 +1924,7 @@
     =.  cor  (update-peer erp erd)
     =.  cor
       %-  emit
-      %+  send:tcp  erp
+      %-  ~(send tcp erp)
       %-  ~(write ne:b-ser network)
       :+  [%verack ~]
           [%getheaders make-block-locator ~]
@@ -1942,7 +1940,7 @@
           ['ping message before handshake' ~^~d10]
           erp
     %-  emit
-    %+  send:tcp  erp
+    %-  ~(send tcp erp)
     %-  ~(write ne:b-ser network)
     :~  [%pong nonce.msg]
     ==
@@ -2026,7 +2024,7 @@
         cor
       :: serve a tx that was previously announced by inv
       %-  emit
-      %+  send:tcp  erp
+      %-  ~(send tcp erp)
       %-  ~(write ne:b-ser network)
       :_  ~
       =/  txn  (~(get by tx-broadcast-cache) hash.inv)
@@ -2307,7 +2305,7 @@
           =/  req  [%block-filter ~]
           =.  cor  (emit (set-pending-block-height-req-timer het req))
           %-  emit
-          %+  send:tcp  u.som
+          %-  ~(send tcp u.som)
           %-  ~(write ne:b-ser network)
           :~  (make-getcfilters-message het haz)
           ==
@@ -2366,7 +2364,7 @@
       :: TODO: save orphan headers per peer while unsynced and then process them when synced becomes true
       ?.  is-fully-synced  cor
       %-  emit
-      %+  send:tcp  erp
+      %-  ~(send tcp erp)
       %-  ~(write ne:b-ser network)
       :~  [%getheaders make-block-locator ~]
       ==
@@ -2439,7 +2437,7 @@
                 =/  req  [%block ~]
                 =.  cor  (emit (set-pending-block-height-req-timer het req))
                 %-  emit
-                %+  send:tcp  u.som
+                %-  ~(send tcp u.som)
                 %-  ~(write ne:b-ser network)
                 :~  [%getdata [%msg-witness-block haz] ~]
                 ==
@@ -2580,50 +2578,35 @@
   ==
 ::
 ++  tcp
-  |%
-  +$  fief
-    $%  [%turf p=(list turf) q=@ud]
-        [%if p=@if q=@ud]
-        [%is p=@is q=@ud]
-    ==
-  +$  target  [secure=? =fief]
-  +$  task
-    $%  [%connect =wire =target timeout=(unit @ud)]
-        [%send =wire data=octs]
-        [%close =wire]
-    ==
-  +$  gift
-    $%  [%connected =wire]
-        [%receive =wire data=octs]
-        [%closed =wire]
-        [%error =wire msg=@t]
-    ==
+  |_  erp=earth-address
+  ::
+  ++  wire
+    ?>  ?|  ?=(%ipv4 net-id.erp)
+            ?=(%ipv6 net-id.erp)
+        ==
+    %+  weld
+        /tcp
+    %-  en-earth-peer-path
+        erp
   ::
   ++  open
-    |=  erp=earth-address
-    ^-  (list card)
-    ?>  |(?=(%ipv4 net-id.erp) ?=(%ipv6 net-id.erp))
-    =/  paf  (en-earth-peer-path erp)
-    =/  sid  (weld /tcp paf)
-    :~  [%pass (weld /tcp/connect paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%connect sid [%.n %if `@`address.erp port.erp] ~])]
-        [%pass sid %agent [our.bowl %tcp] %watch sid]
+    ^-  card
+    :*  %pass  wire  %arvo  %m
+        %connect  |  `@`address.erp  port.erp
     ==
   ::
   ++  close
-    |=  erp=earth-address
-    ^-  (list card)
-    =/  paf  (en-earth-peer-path erp)
-    =/  sid  (weld /tcp paf)
-    :~  [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%close sid])]
-        [%pass (weld /tcp/watch paf) %agent [our.bowl %tcp] %leave ~]
+    ^-  card
+    :*  %pass  wire  %arvo  %m
+        %close  ~
     ==
   ::
   ++  send
-    |=  [erp=earth-address dat=octs]
+    |=  dat=octs
     ^-  card
-    =/  paf  (en-earth-peer-path erp)
-    =/  sid  (weld /tcp paf)
-    [%pass (weld /tcp/poke paf) %agent [our.bowl %tcp] %poke %tcp-task !>([%send sid dat])]
+    :*  %pass  wire  %arvo  %m
+        %send  dat
+    ==
   ::
   --
 ::
