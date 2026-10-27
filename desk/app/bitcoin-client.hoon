@@ -2591,8 +2591,13 @@
   ::
   ++  open
     ^-  card
+    =/  ady
+      ?+  net-id.erp  !!
+          %ipv4  [%if `@if``@`address.erp port.erp]
+          %ipv6  [%is `@is``@`address.erp port.erp]
+      ==
     :*  %pass  wire  %arvo  %m
-        %connect  |  `@`address.erp  port.erp
+        %connect  |  ady
     ==
   ::
   ++  close
