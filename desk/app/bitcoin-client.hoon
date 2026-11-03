@@ -706,7 +706,18 @@
       %-  emil
       %-  ~(res ~(transaction make-update ~^src.bowl) haz tid)
           ~
-    :: TODO: check block cache
+    =/  bok  (~(get by block-cache) block-height.u.hed)
+    ?^  bok
+      =/  txn  (get-transaction-from-block tid u.bok)
+      %-  emil
+      %-  ~(res ~(transaction make-update ~^src.bowl) haz tid)
+      ?~  txn  ~
+      :_  txn
+      %:  make-block-info
+          block-height.u.hed
+          haz
+          chainwork.u.hed
+      ==
     =/  req  [%transaction tid]
     ?:  (~(has ju pending-block-hash-reqs) haz req)  cor
     =.  pending-block-hash-reqs  (~(put ju pending-block-hash-reqs) haz req)
@@ -1028,6 +1039,25 @@
   %+  sub
       block-height.best-block
       range
+::
+++  get-transaction-from-block
+  |=  [tar=txid bok=block]
+  ^-  $@(~ [index=@ud =txid =wtxid =transaction])
+  =/  ind  0
+  |-
+  ?~  txs.bok  ~
+  =/  tid  (make-txid:b-ser i.txs.bok)
+  ?:  =(tid tar)
+    =/  wid  (make-wtxid:b-ser i.txs.bok)
+    :*  ind
+        tid
+        wid
+        i.txs.bok
+    ==
+  %=  $
+      ind      +(ind)
+      txs.bok  t.txs.bok
+  ==
 ::
 ++  make-block-info
   |=  [het=block-height haz=block-hash wok=chainwork]
@@ -2087,23 +2117,7 @@
             %+  ~(del ju pending-block-hash-reqs)
                 haz
                 i.hash-reqs
-          =/  txn
-            ^-  $@(~ [index=@ud =txid =wtxid =transaction])
-            =/  ind  0
-            |-
-            ?~  txs.bok  ~
-            =/  tid  (make-txid:b-ser i.txs.bok)
-            ?:  =(tid txid.i.hash-reqs)
-              =/  wid  (make-wtxid:b-ser i.txs.bok)
-              :*  ind
-                  tid
-                  wid
-                  i.txs.bok
-              ==
-            %=  $
-                ind  +(ind)
-                txs.bok  t.txs.bok
-            ==
+          =/  txn  (get-transaction-from-block txid.i.hash-reqs bok)
           %-  emil
           %-  ~(res ~(transaction make-update ~) haz txid.i.hash-reqs)
           ?~  txn  ~
