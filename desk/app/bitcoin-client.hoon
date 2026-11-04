@@ -993,7 +993,8 @@
 ::
 ++  is-fully-synced
   ^-  ?
-  ?&  block-headers-are-synced
+  ?&  have-live-peers
+      block-headers-are-synced
       filter-headers-are-synced
   ==
 ::
@@ -1003,15 +1004,20 @@
   =*  het  block-height.best-block
   =/  hed  (~(got by block-headers) haz)
   =/  tim  (de-earth-time time.block-header.hed)
-  =/  hit  :: TODO: handle the possibility of a peer falsely setting a higher starting-height
-    %-  ~(rep by earth-peers)
-    |=  [[erp=earth-address erd=earth-peer-state] acc=block-height]
-    %+  max
+  =/  hes
+    %+  murn  ~(tap by earth-peers)
+    |=  [erp=earth-address erd=earth-peer-state]
+    ?.  handshake-done.erd  ~
+    :-  ~
         starting-height.erd
-        acc
-  ?&  have-live-peers
-      (gte tim (sub now.bowl ~d1))
-      (gte het hit)
+  ?.  .?(hes)  |
+  =/  med
+    %+  snag  (div (lent hes) 2)
+    %+  sort
+        hes
+        gth
+  ?&  (gte tim (sub now.bowl ~d1))
+      (gte het med)
   ==
 ::
 ++  filter-headers-are-synced
