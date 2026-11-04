@@ -2374,7 +2374,8 @@
         %redundant
       ?.  .?(t.headers.msg)
         ~?  verb.config  %redundant-headers
-        cor
+        ?:  |(?=(^ header-sync-req) is-fully-synced)  cor
+        continue-syncing-headers
       %=  $
           headers.msg  t.headers.msg
       ==
@@ -2382,18 +2383,23 @@
         %orphan
       ~?  verb.config  [%orphan-block-header block-hash.val hed]
       :: TODO: save orphan headers per peer while unsynced and then process them when synced becomes true
-      ?.  is-fully-synced  cor
-      %-  emit
-      %-  ~(send tcp erp)
-      %-  ~(write ne:b-ser network)
-      :~  [%getheaders make-block-locator ~]
-      ==
+      =.  cor
+        %-  emit
+        %-  ~(send tcp erp)
+        %-  ~(write ne:b-ser network)
+        :~  [%getheaders make-block-locator ~]
+        ==
+      ?:  |(?=(^ header-sync-req) is-fully-synced)  cor
+      continue-syncing-headers
     ::
         %invalid
       ~?  verb.config  [%invalid-block-header block-hash.val validation-checks.val hed]
-      %+  disconnect-peer
-          ['invalid block header' ~^~d10]
-          erp
+      =.  cor
+        %+  disconnect-peer
+            ['invalid block header' ~^~d10]
+            erp
+      ?:  |(?=(^ header-sync-req) is-fully-synced)  cor
+      continue-syncing-headers
     ::
         %valid
       =*  haz  block-hash.val
