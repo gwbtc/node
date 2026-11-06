@@ -1,0 +1,108 @@
+<html>
+  <head>
+    <link rel="stylesheet" href="/utilities/style.css">
+    <link rel="stylesheet" href="/utilities/explorer/explorer.css">
+    <script type="module" src="/utilities/explorer/explorer.js"></script>
+  </head>
+  <body>
+    <nav class="topbar">
+        <div><a href="?tab=network">Network</a></div>
+        <div><a href="?tab=my-node">My Node</a></div>
+    </nav>
+    <main>
+      <section data-view="explorer"><div id="explorer-root"></div></section>
+      <section data-view="my-node">
+        <div id="my-node-root"></div>
+        <nav class="mn-subnav">
+          <a href="?tab=s3">S3 / Jars</a>
+          <a href="?tab=notifications">Notifications</a>
+          <a href="?tab=calls">Calls</a>
+          <a href="?tab=armillary">Armillary</a>
+          <a href="?tab=mcp-tools">MCP Tools</a>
+        </nav>
+        <section class="mn-panel" data-panel="s3"></section>
+        <section class="mn-panel" data-panel="notifications"></section>
+        <section class="mn-panel" data-panel="calls"></section>
+        <section class="mn-panel" data-panel="armillary"></section>
+        <section class="mn-panel" data-panel="mcp-tools"></section>
+      </section>
+    </main>
+    <script>
+      // Tab navigation for the top and my-node navbar.
+
+      (function () {
+        const body = document.body;
+        const LINKS = '.topbar a[href^="?tab="], .mn-subnav a[href^="?tab="]';
+        const panels = Array.from(document.querySelectorAll('.mn-panel[data-panel]'), (p) => p.dataset.panel);
+        let lastPanel = panels[0];
+
+        // a ?tab= value -> { view, panel }; anything unknown is the network view
+        function parse(tab) {
+          if (tab === 'my-node') return { view: 'my-node', panel: lastPanel };
+          if (panels.includes(tab)) return { view: 'my-node', panel: tab };
+          return { view: 'explorer', panel: lastPanel };
+        }
+
+        const tabIn = (href) => new URL(href, location.href).searchParams.get('tab') || '';
+        const addressOf = (route) => `?tab=${route.view === 'my-node' ? route.panel : 'network'}`;
+
+        function apply(route) {
+          const wasHidden = body.dataset.activeView === 'my-node';
+          body.dataset.activeView = route.view;
+          body.dataset.activePanel = route.panel;
+          if (route.view === 'my-node') lastPanel = route.panel;
+
+          for (const a of document.querySelectorAll(LINKS)) {
+            const tab = tabIn(a.getAttribute('href'));
+            const active = a.closest('.topbar')
+              ? tab === (route.view === 'my-node' ? 'my-node' : 'network')
+              : tab === route.panel;
+            if (active) a.setAttribute('aria-current', 'page');
+            else a.removeAttribute('aria-current');
+          }
+
+          // the explorer marks the block headers on screen as seen (the rest are
+          // highlighted as new) on resize; while hidden it can't see any, so let
+          // it check again when it is back
+          if (route.view === 'explorer' && wasHidden) window.dispatchEvent(new Event('resize'));
+        }
+
+        document.addEventListener('click', (e) => {
+          const a = e.target.closest(LINKS);
+          // leave new-tab / new-window clicks to the browser
+          if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          const route = parse(tabIn(a.getAttribute('href')));
+          const address = addressOf(route);
+          if (location.search !== address) history.pushState(null, '', address);
+          apply(route);
+        });
+
+        // Back/Forward
+        window.addEventListener('popstate', () => apply(parse(tabIn(location.href))));
+
+        apply(parse(tabIn(location.href)));
+      })();
+    </script>
+    <script type="module">
+      // My Node: fill each tab with its panel; a tab without one says so.
+      import * as s3 from '/utilities/my-node/panels/s3.js';
+      import { notifications, calls } from '/utilities/my-node/panels/trunk.js';
+      import * as mcp from '/utilities/my-node/panels/mcp.js';
+      import { el } from '/utilities/my-node/lib.js';
+
+      const panels = { s3, notifications, calls, 'mcp-tools': mcp };
+
+      for (const root of document.querySelectorAll('.mn-panel[data-panel]')) {
+        const name = root.dataset.panel;
+        if (panels[name]) panels[name].render(root);
+        else {
+          const label = document.querySelector(`.mn-subnav a[href="?tab=${name}"]`)?.textContent || name;
+          root.replaceChildren(el('div', { className: 'mn-page' }, [
+            el('p', { className: 'mn-empty' }, [`${label} settings — not connected yet.`])
+          ]));
+        }
+      }
+    </script>
+  </body>
+</html>

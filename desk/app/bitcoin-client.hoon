@@ -963,8 +963,8 @@
       [%explorer %file-update ~]
     ?.  ?=([%clay %writ *] sin)  cor
     ~?  verb.config  'updating explorer ui'
-    =.  cor  (emil set-explorer-ui)
-    =.  cor  (emit watch-explorer-ui-files)
+    :: =.  cor  (emil set-explorer-ui)
+    :: =.  cor  (emit watch-explorer-ui-files)
     cor
   ::
   ==
@@ -2722,8 +2722,8 @@
 ::
 ++  init
   ^+  cor
-  =.  cor  (emil set-explorer-ui)
-  =.  cor  (emit watch-explorer-ui-files)
+  :: =.  cor  (emil set-explorer-ui)
+  :: =.  cor  (emit watch-explorer-ui-files)
   :: %mainnet by default
   :: in order to use a test network, change the parameter below.
   :: (if the agent was already running, you must nuke it and rebuild)
