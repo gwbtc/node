@@ -358,18 +358,37 @@ export function createPanel(root, prefix) {
     }
   }
 
-  // show the cards; load now and every 15 s while on screen
-  function mount(cards, loader) {
+  // show the cards; load now and whenever they come back on screen (tab
+  // picked, browser tab shown); every 15 s while on screen run `poller`,
+  // the parts that change on their own, or the whole load without one
+  function mount(cards, loader, poller) {
     load = async (force = false) => {
       if (busy) return;
       await loader(force);
     };
+    const poll = poller
+      ? async () => {
+        if (busy) return;
+        await poller();
+      }
+      : load;
     const page = el('div', { className: 'mn-page' }, [pageStatus.node, ...cards]);
     root.replaceChildren(page);
     for (const s of Object.values(sections)) s.body.replaceChildren(el('p', { className: 'mn-empty' }, ['Loading…']));
     load();
+
+    let shown = isShown(page);
+    const recheck = () => {
+      const now = isShown(page);
+      if (now && !shown) load();
+      shown = now;
+    };
+    document.addEventListener('visibilitychange', recheck);
+    // the tab bar switches tabs by body[data-active-panel]
+    new MutationObserver(recheck).observe(document.body, { attributes: true, attributeFilter: ['data-active-panel'] });
+
     setInterval(() => {
-      if (isShown(page)) load();
+      if (isShown(page)) poll();
     }, POLL_MS);
   }
 

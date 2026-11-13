@@ -233,7 +233,11 @@ export function render(root) {
   function showChosen() {
     const files = Array.from(fileInput.files || []);
     if (!files.length) {
-      dropText.replaceChildren(el('strong', {}, ['Drop files here']), ' or click to choose');
+      dropText.replaceChildren(
+        el('strong', {}, ['Drop files here']),
+        ...(state.bucket ? [' to upload them to ', el('strong', {}, [state.bucket])] : []),
+        ' or click to choose'
+      );
     } else {
       const total = files.reduce((n, f) => n + f.size, 0);
       dropText.replaceChildren(
@@ -444,6 +448,7 @@ export function render(root) {
     if (name) saveLastBucket(name);
     renderBucketOptions();
     renderListing();
+    showChosen(); // the drop area names the bucket
     await refresh();
   }
 

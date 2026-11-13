@@ -89,9 +89,10 @@
       import * as s3 from '/utilities/my-node/panels/s3.js';
       import { notifications, calls } from '/utilities/my-node/panels/trunk.js';
       import * as mcp from '/utilities/my-node/panels/mcp.js';
+      import * as armillary from '/utilities/my-node/panels/armillary.js';
       import { el } from '/utilities/my-node/lib.js';
 
-      const panels = { s3, notifications, calls, 'mcp-tools': mcp };
+      const panels = { s3, notifications, calls, armillary, 'mcp-tools': mcp };
 
       for (const root of document.querySelectorAll('.mn-panel[data-panel]')) {
         const name = root.dataset.panel;
