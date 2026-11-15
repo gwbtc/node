@@ -15,6 +15,8 @@ let headerViewedFrame = null;
 let networkPanelFrame = null;
 const dirtyNetworkTabs = new Set();
 let syncStatusRevision = 0;
+let cometConnectionsFrame = null;
+let cometConnectionsUntil = 0;
 
 const explorerState = {
   network: null,
@@ -35,6 +37,15 @@ const explorerState = {
   pendingFilterHeaderHeights: new Set(),
   filterHeaderHeightsInFlight: new Set(),
   peers: null,
+  cometSponsorshipGraph: null,
+  observatoryOur: null,
+  cometSelection: [],
+  cometSelectionDepth: 0,
+  cometColumnCenters: [],
+  cometScryError: null,
+  cometPeers: new Map(),
+  pendingCometPeers: new Set(),
+  cometPeerErrors: new Map(),
   addresses: null,
   blacklist: null,
   selectedTab: { type: 'peers' },
@@ -91,6 +102,8 @@ const searchHeaderPlaceholders = Array.from(
 addEventListener('DOMContentLoaded', async () => {
   our = document.documentElement.getAttribute('our');
   renderExplorer();
+  scryComets();
+  scryObservatoryOur();
   const hasValidNetwork = await scryNetwork();
   if (hasValidNetwork) connectToShip();
 });
@@ -99,6 +112,126 @@ function handleConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) return;
   explorerState.config = config;
   if (explorerState.selectedTab.type === 'config') renderExplorer();
+}
+
+async function scryObservatoryOur() {
+  try {
+    const response = await fetch(`${window.location.origin}/~/scry/observatory/our.json`);
+    if (!response.ok) {
+      throw new Error(`Observatory our scry failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data || typeof data.patp !== 'string' || !Array.isArray(data.custody)) {
+      throw new Error('Expected Observatory identity and custody data');
+    }
+    explorerState.observatoryOur = data;
+    renderExplorer();
+  } catch (error) {
+    console.error('Unable to load Observatory identity:', error);
+  }
+}
+
+async function scryComets() {
+  try {
+    const response = await fetch(`${window.location.origin}/~/scry/observatory/comets.json`);
+    if (!response.ok) {
+      throw new Error(`Comets scry failed with status ${response.status}`);
+    }
+
+    explorerState.cometSponsorshipGraph = buildCometSponsorshipGraph(await response.json());
+    explorerState.cometSelection = explorerState.cometSponsorshipGraph.length
+      ? [explorerState.cometSponsorshipGraph[0].patp] : [];
+    explorerState.cometSelectionDepth = 0;
+    explorerState.cometColumnCenters = [];
+    explorerState.cometScryError = null;
+    scryCometPeer(explorerState.cometSelection.at(-1));
+  } catch (error) {
+    explorerState.cometScryError = 'Unable to load comets from Observatory.';
+    console.error('Unable to load Observatory comets:', error);
+  }
+  renderExplorer();
+}
+
+async function scryCometPeer(patp) {
+  if (!patp || explorerState.cometPeers.has(patp) || explorerState.pendingCometPeers.has(patp)) return;
+  explorerState.pendingCometPeers.add(patp);
+  explorerState.cometPeerErrors.delete(patp);
+  try {
+    const response = await fetch(`${window.location.origin}/~/scry/observatory/peer/${encodeURIComponent(patp)}.json`);
+    // The vane/agent has no known legacy peer record for this identity.
+    if (response.status === 404) {
+      explorerState.cometPeers.set(patp, null);
+    } else {
+      if (!response.ok) throw new Error(`Peer scry failed with status ${response.status}`);
+      const peer = await response.json();
+      if (peer !== null && (typeof peer !== 'object' || Array.isArray(peer))) {
+        throw new Error('Expected Observatory peer data');
+      }
+      explorerState.cometPeers.set(patp, peer);
+    }
+  } catch (error) {
+    explorerState.cometPeerErrors.set(patp, 'Unable to load networking data.');
+    console.error(`Unable to load Observatory peer ${patp}:`, error);
+  } finally {
+    explorerState.pendingCometPeers.delete(patp);
+    // An older response may populate its cache, but never replaces the
+    // details belonging to the comet the user has since selected.
+    if (explorerState.cometSelection.at(-1) === patp) renderExplorer();
+  }
+}
+
+// A forest of { patp, nym, sponsees: [...] } nodes, including sponsors
+// mentioned only as parents.  Index first so input order does not matter.
+function buildCometSponsorshipGraph(comets) {
+  if (!Array.isArray(comets)) throw new Error('Expected an Observatory comets array');
+
+  const nodes = new Map();
+  const parents = new Map();
+  function getNode(comet) {
+    if (!comet || typeof comet.patp !== 'string' || !comet.patp) {
+      throw new Error('Expected a comet with a patp');
+    }
+    if (!nodes.has(comet.patp)) {
+      nodes.set(comet.patp, { patp: comet.patp, nym: comet.nym || '', sponsees: [] });
+    } else if (comet.nym) {
+      nodes.get(comet.patp).nym = comet.nym;
+    }
+    return nodes.get(comet.patp);
+  }
+
+  for (const comet of comets) {
+    const node = getNode(comet);
+    parents.delete(node.patp);
+    if (comet.sponsor) {
+      const sponsor = getNode(comet.sponsor);
+      if (sponsor.patp !== node.patp) parents.set(node.patp, sponsor.patp);
+    }
+  }
+
+  // Break a cyclic sponsorship edge before nesting, preserving every
+  // identity while ensuring the graph can be traversed and serialized.
+  const complete = new Set();
+  for (const patp of nodes.keys()) {
+    const path = new Set();
+    let current = patp;
+    while (current !== undefined && !complete.has(current)) {
+      if (path.has(current)) {
+        parents.delete(current);
+        break;
+      }
+      path.add(current);
+      current = parents.get(current);
+    }
+    for (const visited of path) complete.add(visited);
+  }
+
+  const roots = [];
+  for (const [patp, node] of nodes) {
+    const sponsor = parents.get(patp);
+    if (sponsor === undefined) roots.push(node);
+    else nodes.get(sponsor).sponsees.push(node);
+  }
+  return roots;
 }
 
 async function scryNetwork() {
@@ -1290,6 +1423,7 @@ function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
   }
 
   restoreHeaderScrollAnchor(scrollAnchor);
+  scheduleCometConnections();
 }
 
 const renderEventListeners = Symbol('renderEventListeners');
@@ -1383,9 +1517,19 @@ function reconcileEventListeners(currentElement, nextElement) {
 }
 
 function reconcileChildren(currentElement, nextElement) {
+  const nextChildren = Array.from(nextElement.childNodes);
+  // Prune expired keyed rows before positioning survivors.  Otherwise a
+  // departing first row makes insertBefore move every surviving comet,
+  // which cancels its CSS transition when scrolling down the column.
+  if (nextChildren.every((child) => renderKey(child) !== null) &&
+      Array.from(currentElement.childNodes).every((child) => renderKey(child) !== null)) {
+    const nextKeys = new Set(nextChildren.map(renderKey));
+    for (const child of Array.from(currentElement.childNodes)) {
+      if (!nextKeys.has(renderKey(child))) child.remove();
+    }
+  }
   const currentChildren = Array.from(currentElement.childNodes);
   const usedChildren = new Set();
-  const nextChildren = Array.from(nextElement.childNodes);
 
   nextChildren.forEach((nextChild, index) => {
     const nextKey = renderKey(nextChild);
@@ -3250,6 +3394,375 @@ function ConfigPanel(state) {
   }, [form]);
 }
 
+// Centering browses the hierarchy independently of how deeply the user
+// has selected it.  Newly opened sponsee lists start at their midpoint.
+function cometColumns(state) {
+  const columns = [];
+  let comets = state.cometSponsorshipGraph ?? [];
+  while (comets.length) {
+    const depth = columns.length;
+    const savedCenter = comets.findIndex((comet) =>
+      comet.patp === state.cometColumnCenters[depth]
+    );
+    const centered = savedCenter >= 0 ? savedCenter : depth === 0 ? 0 : Math.floor(comets.length / 2);
+    columns.push({ comets, centered, selectionActive: depth <= state.cometSelectionDepth });
+    comets = comets[centered].sponsees;
+  }
+  return columns;
+}
+
+function centerComet(depth, index, selectionDepth = explorerState.cometSelectionDepth) {
+  const columns = cometColumns(explorerState);
+  const column = columns[depth];
+  if (!column || index < 0 || index >= column.comets.length) return;
+  // Changing only selection depth must not reset the browsed descendants.
+  if (index !== column.centered) {
+    explorerState.cometColumnCenters = columns.slice(0, depth).map(({ comets, centered }) =>
+      comets[centered].patp
+    );
+    explorerState.cometColumnCenters.push(column.comets[index].patp);
+  }
+  explorerState.cometSelectionDepth = selectionDepth;
+  explorerState.cometSelection = cometColumns(explorerState)
+    .slice(0, selectionDepth + 1)
+    .map(({ comets, centered }) => comets[centered].patp);
+  scryCometPeer(explorerState.cometSelection.at(-1));
+  renderExplorer();
+}
+
+// Activating a comet is the only interaction that changes selection depth.
+function selectComet(depth, index) {
+  centerComet(depth, index, depth);
+}
+
+function truncateCometPatp(patp) {
+  const words = patp.replace(/^~/, '').split(/-+/);
+  return words.length > 1 ? `~${words[0]}_${words[words.length - 1]}` : patp;
+}
+
+function CometConnections() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('data-render-key', 'comet-connections');
+  svg.setAttribute('class', 'comet-connections');
+  svg.setAttribute('aria-hidden', 'true');
+  return svg;
+}
+
+// Sample the actual animated text positions, so the curves follow CSS
+// transitions in either direction, including rapid mid-animation flips.
+function drawCometConnections() {
+  const container = document.querySelector('.comet-columns');
+  const svg = container?.querySelector('.comet-connections');
+  const columns = container?.querySelectorAll('.comet-column');
+  if (!svg || !columns.length) return;
+  const bounds = container.getBoundingClientRect();
+  const viewport = columns[0].querySelector('.comet-column__list').getBoundingClientRect();
+  const lastColumn = columns[columns.length - 1];
+  const width = lastColumn.offsetLeft + lastColumn.offsetWidth;
+  svg.style.top = `${viewport.top - bounds.top + container.scrollTop}px`;
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', viewport.height);
+  const paths = [];
+  for (let depth = 1; depth < columns.length; depth++) {
+    const sponsor = columns[depth - 1].querySelector('.comet-column__comet--centered .comet-column__name');
+    if (!sponsor) continue;
+    const from = sponsor.getBoundingClientRect();
+    for (const button of columns[depth].querySelectorAll('.comet-column__comet')) {
+      // Row appearance tracks selection/distance without button hover.
+      const appearance = getComputedStyle(button.parentElement);
+      const opacity = Number(appearance.opacity);
+      if (opacity < 0.01) continue;
+      const to = button.querySelector('.comet-column__name').getBoundingClientRect();
+      const x1 = from.right - bounds.left + container.scrollLeft + 8;
+      const y1 = (from.top + from.bottom) / 2 - viewport.top;
+      const x2 = to.left - bounds.left + container.scrollLeft - 8;
+      const y2 = (to.top + to.bottom) / 2 - viewport.top;
+      // Curve nearer the sponsor, with a short flat approach to the sponsee.
+      const span = x2 - x1;
+      const turnX = x1 + span * 0.28;
+      const flatX = x1 + span * 0.68;
+      const path = document.createElementNS(svg.namespaceURI, 'path');
+      // Avoid a redundant curve/line join on the aligned connection;
+      // its stroke can leave a small rasterization seam near the label.
+      path.setAttribute('d', Math.abs(y2 - y1) < 0.5
+        ? `M ${x1} ${y1} L ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${turnX} ${y1}, ${turnX} ${y2}, ${flatX} ${y2} H ${x2}`);
+      path.setAttribute('opacity', opacity);
+      path.style.stroke = appearance.color;
+      path.setAttribute('class', 'comet-connection');
+      paths.push(path);
+    }
+  }
+  svg.replaceChildren(...paths);
+}
+
+function scheduleCometConnections() {
+  cometConnectionsUntil = performance.now() + 220;
+  if (cometConnectionsFrame !== null) return;
+  const draw = () => {
+    cometConnectionsFrame = null;
+    drawCometConnections();
+    if (performance.now() < cometConnectionsUntil &&
+        !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      cometConnectionsFrame = requestAnimationFrame(draw);
+    }
+  };
+  cometConnectionsFrame = requestAnimationFrame(draw);
+}
+
+addEventListener('resize', scheduleCometConnections);
+
+// Keep gesture state on the retained DOM column across selection renders.
+const cometScrollGestures = new WeakMap();
+
+function scrollCometColumn(column, depth, delta) {
+  const gesture = cometScrollGestures.get(column) ?? { delta: 0, at: 0, flippedAt: -Infinity };
+  const now = performance.now();
+  if (now - gesture.at > 180 || Math.sign(delta) !== Math.sign(gesture.delta)) {
+    gesture.delta = 0;
+  }
+  gesture.at = now;
+  gesture.delta += delta;
+  cometScrollGestures.set(column, gesture);
+  if (Math.abs(gesture.delta) < 40 || now - gesture.flippedAt < 120) return;
+
+  const direction = Math.sign(gesture.delta);
+  gesture.delta = 0;
+  gesture.flippedAt = now;
+  const current = cometColumns(explorerState)[depth];
+  if (current) centerComet(depth, current.centered + direction);
+}
+
+function CometColumn({ comets, centered, selectionActive }, depth) {
+  const key = `comet-column:${depth}`;
+  const flipButton = (direction) => {
+    const index = centered + direction;
+    const disabled = index < 0 || index >= comets.length;
+    return listen(element('button', {
+      key: `${key}:flip:${direction}`,
+      className: 'comet-column__arrow',
+      text: direction < 0 ? '▲' : '▼',
+      attributes: {
+        type: 'button',
+        'aria-label': `${direction < 0 ? 'Previous' : 'Next'} comet in column ${depth + 1}`,
+        ...(disabled ? { disabled: '' } : {})
+      }
+    }), 'click', () => centerComet(depth, index));
+  };
+
+  const column = element('div', {
+    key,
+    className: 'comet-column',
+    attributes: { role: 'group', 'aria-label': `Sponsorship column ${depth + 1}` }
+  }, [
+    element('div', { className: 'comet-column__heading' }, [
+      element('span', { text: `${centered + 1} / ${comets.length}` })
+    ]),
+    flipButton(-1),
+    element('ul', { className: 'comet-column__list' },
+      // Offscreen neighbors keep their DOM identity while sliding into
+      // view.  The viewport clips everything beyond the five visible rows.
+      [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => {
+        const index = centered + offset;
+        const comet = comets[index];
+        if (!comet) return null;
+        const offscreen = Math.abs(offset) > 2;
+        const isSelected = offset === 0 && selectionActive;
+        return element('li', {
+          key: `${key}:comet:${comet.patp}`,
+          className: `comet-column__slot comet-column__slot--distance-${Math.min(2, Math.abs(offset))}${isSelected ? ' comet-column__slot--selected' : ''}${offscreen ? ' comet-column__slot--offscreen' : ''}`,
+          attributes: {
+            style: `transform: translateY(${(offset + 2) * 64}px)`,
+            ...(offscreen ? { 'aria-hidden': 'true' } : {})
+          }
+        }, [listen(element('button', {
+          key: `${key}:comet:${comet.patp}:button`,
+          className: `comet-column__comet${offset === 0 ? ' comet-column__comet--centered' : ''}${isSelected ? ' comet-column__comet--selected' : ''}`,
+          attributes: {
+            type: 'button',
+            'aria-pressed': isSelected ? 'true' : 'false',
+            ...(offscreen ? { tabindex: '-1' } : {}),
+            title: comet.patp
+          }
+        }, [element('span', {
+          className: 'comet-column__name',
+          text: truncateCometPatp(comet.patp)
+        })]), 'click', () => selectComet(depth, index))]);
+      })
+    ),
+    flipButton(1)
+  ]);
+  listen(column, 'wheel', (event) => {
+    // Leave horizontal trackpad gestures and browser pinch zoom alone.
+    if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    if (!event.deltaY) return;
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? event.currentTarget.clientHeight : 1;
+    scrollCometColumn(event.currentTarget, depth, event.deltaY * unit);
+  }, { passive: false });
+
+  listen(column, 'touchstart', (event) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    cometScrollGestures.set(event.currentTarget, {
+      delta: 0, at: 0, flippedAt: -Infinity,
+      touch: { id: touch.identifier, x: touch.clientX, y: touch.clientY, lastY: touch.clientY, axis: null }
+    });
+  }, { passive: true });
+  listen(column, 'touchmove', (event) => {
+    const gesture = cometScrollGestures.get(event.currentTarget);
+    if (!gesture?.touch || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const start = gesture.touch;
+    if (touch.identifier !== start.id) return;
+    if (!start.axis) {
+      const dx = Math.abs(touch.clientX - start.x);
+      const dy = Math.abs(touch.clientY - start.y);
+      if (Math.max(dx, dy) < 8) return;
+      start.axis = dy > dx ? 'vertical' : 'horizontal';
+    }
+    if (start.axis !== 'vertical') return;
+    event.preventDefault();
+    const delta = start.lastY - touch.clientY;
+    start.lastY = touch.clientY;
+    scrollCometColumn(event.currentTarget, depth, delta);
+  }, { passive: false });
+  const endTouch = (event) => {
+    const gesture = cometScrollGestures.get(event.currentTarget);
+    // A swipe must not also activate the comet button under the finger.
+    if (gesture?.touch?.axis === 'vertical' && event.cancelable) event.preventDefault();
+    if (gesture) delete gesture.touch;
+  };
+  listen(column, 'touchend', endTouch, { passive: false });
+  listen(column, 'touchcancel', endTouch, { passive: false });
+
+  return listen(column, 'keydown', (event) => {
+    const index = {
+      ArrowUp: centered - 1,
+      ArrowDown: centered + 1,
+      Home: 0,
+      End: comets.length - 1
+    }[event.key];
+    if (index === undefined) return;
+    event.preventDefault();
+    centerComet(depth, index);
+  });
+}
+
+function formatCometFief(fief) {
+  if (!fief) return 'Not declared';
+  const host = fief.type === 'turf'
+    ? fief.domains.map((labels) => [...labels].reverse().join('.')).join(', ')
+    : fief.type === 'ipv6' ? `[${fief.address}]` : fief.address;
+  return `${host}:${fief.port}`;
+}
+
+function CometPeerDetails(patp, state) {
+  if (!patp) return null;
+  const key = `comet-peer:${patp}`;
+  const status = (text) => element('p', {
+    key: `${key}:status`, className: 'comet-peer__status', text,
+    attributes: { role: 'status' }
+  });
+  if (state.pendingCometPeers.has(patp)) return status('Loading networking data…');
+  if (state.cometPeerErrors.has(patp)) {
+    return element('div', { key: `${key}:error` }, [
+      status(state.cometPeerErrors.get(patp)),
+      listen(element('button', {
+        className: 'comet-peer__retry', text: 'Retry', attributes: { type: 'button' }
+      }), 'click', () => {
+        scryCometPeer(patp);
+        renderExplorer();
+      })
+    ]);
+  }
+  if (!state.cometPeers.has(patp)) return status('Loading networking data…');
+  const peer = state.cometPeers.get(patp);
+  if (!peer) return status('No known Ames peer data for this comet.');
+
+  const route = peer.route;
+  const lane = route?.lane;
+  const routeText = route
+    ? `${route.direct ? 'Direct' : 'Indirect'} · ${lane?.ship ?? lane?.address ?? 'Unknown lane'}`
+    : 'No route';
+  const bones = (items) => items?.length ? items.join(', ') : 'None';
+  const rows = [
+    ['life', 'Life', peer.life],
+    ['rift', 'Rift', peer.rift],
+    ['sponsor', 'Sponsor', peer.sponsor],
+    ['fief', 'Declared endpoint', formatCometFief(peer.fief)],
+    ['route', 'Route', routeText],
+    ['status', 'Connection', peer.qos?.status ?? 'Unavailable'],
+    ['last-contact', 'Last contact', formatPeerTimestamp(peer.qos?.['last-contact'])],
+    ['tracking-started', 'Tracking began', formatPeerTimestamp(peer.qos?.['tracking-started'])],
+    ['sending', 'Sending flows', peer.flows?.sending ?? 0],
+    ['receiving', 'Receiving flows', peer.flows?.receiving ?? 0],
+    ['remote-scries', 'Remote scries', peer.flows?.['remote-scries'] ?? 0],
+    ['closing', 'Closing flows', bones(peer.flows?.closing)],
+    ['corked', 'Corked flows', bones(peer.flows?.corked)],
+    ['halted', 'Halted flows', bones(peer.flows?.halted)],
+    ['nacks', 'Negative acknowledgments', peer.flows?.nacks ?? 0]
+  ];
+  const fields = (entries) => entries.map(([field, label, value]) =>
+    PeerDetailField(key, field, label, value ?? 'Unavailable')
+  );
+  return element('div', { key, className: 'comet-peer' }, [
+    element('dl', { className: 'comet-peer__fields' }, fields(rows)),
+    element('details', { key: `${key}:identity`, className: 'comet-peer__identity' }, [
+      element('summary', { text: 'Public identity material' }),
+      element('dl', { className: 'comet-peer__fields' }, fields([
+        ['pass', 'Pass', peer.pass],
+        ['cry', 'Encryption key', peer['public-keys']?.cry],
+        ['sgn', 'Signing key', peer['public-keys']?.sgn]
+      ]))
+    ])
+  ]);
+}
+
+function CometPanel(state) {
+  const columns = cometColumns(state);
+  const selectedColumn = columns.filter(({ selectionActive }) => selectionActive).at(-1);
+  const selectedComet = selectedColumn?.comets[selectedColumn.centered];
+  return element('section', {
+    key: 'comet-panel',
+    className: 'panel comet-panel',
+    attributes: { 'aria-label': 'Comet sponsorship hierarchy' }
+  }, [
+    element('header', { className: 'panel__header' }, [
+      element('h2', { className: 'comet-panel__title', text: state.observatoryOur?.patp ?? our ?? '' })
+    ]),
+    element('div', { key: 'comet-panel:body', className: 'comet-panel__body' }, [
+      element('div', { key: 'comet-panel:graph', className: 'comet-panel__graph' }, [
+        columns.length
+          ? element('div', { key: 'comet-columns', className: 'comet-columns' }, [
+              CometConnections(),
+              ...columns.map(CometColumn)
+            ])
+          : element('p', {
+              key: 'comet-panel:status',
+              className: 'comet-panel__status',
+              attributes: { role: 'status' },
+              text: state.cometScryError ?? (state.cometSponsorshipGraph === null
+                ? 'Loading comets…'
+                : 'No comets found.')
+            })
+      ]),
+      element('section', {
+        key: 'comet-panel:details',
+        className: 'comet-panel__details',
+        attributes: { 'aria-label': 'Selected comet details' }
+      }, [
+        element('p', {
+          key: 'comet-panel:selected-name',
+          className: 'comet-panel__selected-name',
+          text: selectedComet?.patp ?? 'No comet selected.'
+        }),
+        CometPeerDetails(selectedComet?.patp, state)
+      ])
+    ])
+  ]);
+}
+
 function ExplorerApp(state) {
   const selectedBlock = getSelectedBlock(state);
   const blockData = selectedBlock
@@ -3260,6 +3773,7 @@ function ExplorerApp(state) {
     key: 'explorer',
     className: 'explorer'
   }, [
+    CometPanel(state),
     BlockHeaderPanel(visibleHeaders(state), selectedBlock),
     element('section', {
       key: 'explorer-lower-region',
