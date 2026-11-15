@@ -15,8 +15,6 @@ let headerViewedFrame = null;
 let networkPanelFrame = null;
 const dirtyNetworkTabs = new Set();
 let syncStatusRevision = 0;
-let cometConnectionsFrame = null;
-let cometConnectionsUntil = 0;
 
 const explorerState = {
   network: null,
@@ -39,9 +37,7 @@ const explorerState = {
   peers: null,
   cometSponsorshipGraph: null,
   observatoryOur: null,
-  cometSelection: [],
-  cometSelectionDepth: 0,
-  cometColumnCenters: [],
+  selectedCometPatp: null,
   cometScryError: null,
   cometPeers: new Map(),
   pendingCometPeers: new Set(),
@@ -139,12 +135,9 @@ async function scryComets() {
     }
 
     explorerState.cometSponsorshipGraph = buildCometSponsorshipGraph(await response.json());
-    explorerState.cometSelection = explorerState.cometSponsorshipGraph.length
-      ? [explorerState.cometSponsorshipGraph[0].patp] : [];
-    explorerState.cometSelectionDepth = 0;
-    explorerState.cometColumnCenters = [];
+    explorerState.selectedCometPatp = explorerState.cometSponsorshipGraph[0]?.patp ?? null;
     explorerState.cometScryError = null;
-    scryCometPeer(explorerState.cometSelection.at(-1));
+    scryCometPeer(explorerState.selectedCometPatp);
   } catch (error) {
     explorerState.cometScryError = 'Unable to load comets from Observatory.';
     console.error('Unable to load Observatory comets:', error);
@@ -176,7 +169,7 @@ async function scryCometPeer(patp) {
     explorerState.pendingCometPeers.delete(patp);
     // An older response may populate its cache, but never replaces the
     // details belonging to the comet the user has since selected.
-    if (explorerState.cometSelection.at(-1) === patp) renderExplorer();
+    if (explorerState.selectedCometPatp === patp) renderExplorer();
   }
 }
 
@@ -1410,6 +1403,7 @@ function makeChannelDelete() {
 }
 
 function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
+  const hadCometGraph = Boolean(document.querySelector('.comet-network'));
   const nextRoot = element('div', {
     key: 'explorer-root',
     attributes: { id: 'explorer-root' }
@@ -1423,7 +1417,16 @@ function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
   }
 
   restoreHeaderScrollAnchor(scrollAnchor);
-  scheduleCometConnections();
+  // Start near the default selection, but preserve the user's pan position
+  // on subsequent selections and asynchronous peer-data updates.
+  if (!hadCometGraph) {
+    const viewport = document.querySelector('.comet-network');
+    const selected = viewport?.querySelector('.comet-network__node--selected');
+    if (selected) {
+      viewport.scrollLeft = selected.offsetLeft - viewport.clientWidth / 2;
+      viewport.scrollTop = selected.offsetTop - viewport.clientHeight / 2;
+    }
+  }
 }
 
 const renderEventListeners = Symbol('renderEventListeners');
@@ -1518,9 +1521,7 @@ function reconcileEventListeners(currentElement, nextElement) {
 
 function reconcileChildren(currentElement, nextElement) {
   const nextChildren = Array.from(nextElement.childNodes);
-  // Prune expired keyed rows before positioning survivors.  Otherwise a
-  // departing first row makes insertBefore move every surviving comet,
-  // which cancels its CSS transition when scrolling down the column.
+  // Prune expired keyed children before positioning the survivors.
   if (nextChildren.every((child) => renderKey(child) !== null) &&
       Array.from(currentElement.childNodes).every((child) => renderKey(child) !== null)) {
     const nextKeys = new Set(nextChildren.map(renderKey));
@@ -3394,45 +3395,10 @@ function ConfigPanel(state) {
   }, [form]);
 }
 
-// Centering browses the hierarchy independently of how deeply the user
-// has selected it.  Newly opened sponsee lists start at their midpoint.
-function cometColumns(state) {
-  const columns = [];
-  let comets = state.cometSponsorshipGraph ?? [];
-  while (comets.length) {
-    const depth = columns.length;
-    const savedCenter = comets.findIndex((comet) =>
-      comet.patp === state.cometColumnCenters[depth]
-    );
-    const centered = savedCenter >= 0 ? savedCenter : depth === 0 ? 0 : Math.floor(comets.length / 2);
-    columns.push({ comets, centered, selectionActive: depth <= state.cometSelectionDepth });
-    comets = comets[centered].sponsees;
-  }
-  return columns;
-}
-
-function centerComet(depth, index, selectionDepth = explorerState.cometSelectionDepth) {
-  const columns = cometColumns(explorerState);
-  const column = columns[depth];
-  if (!column || index < 0 || index >= column.comets.length) return;
-  // Changing only selection depth must not reset the browsed descendants.
-  if (index !== column.centered) {
-    explorerState.cometColumnCenters = columns.slice(0, depth).map(({ comets, centered }) =>
-      comets[centered].patp
-    );
-    explorerState.cometColumnCenters.push(column.comets[index].patp);
-  }
-  explorerState.cometSelectionDepth = selectionDepth;
-  explorerState.cometSelection = cometColumns(explorerState)
-    .slice(0, selectionDepth + 1)
-    .map(({ comets, centered }) => comets[centered].patp);
-  scryCometPeer(explorerState.cometSelection.at(-1));
+function selectComet(patp) {
+  explorerState.selectedCometPatp = patp;
+  scryCometPeer(patp);
   renderExplorer();
-}
-
-// Activating a comet is the only interaction that changes selection depth.
-function selectComet(depth, index) {
-  centerComet(depth, index, depth);
 }
 
 function truncateCometPatp(patp) {
@@ -3440,213 +3406,216 @@ function truncateCometPatp(patp) {
   return words.length > 1 ? `~${words[0]}_${words[words.length - 1]}` : patp;
 }
 
-function CometConnections() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('data-render-key', 'comet-connections');
-  svg.setAttribute('class', 'comet-connections');
-  svg.setAttribute('aria-hidden', 'true');
-  return svg;
-}
+// Cache geometry by graph identity: selecting a node or receiving peer
+// data should neither recompute the layout nor move the graph beneath it.
+const cometGraphLayouts = new WeakMap();
+const cometGraphDrags = new WeakMap();
 
-// Sample the actual animated text positions, so the curves follow CSS
-// transitions in either direction, including rapid mid-animation flips.
-function drawCometConnections() {
-  const container = document.querySelector('.comet-columns');
-  const svg = container?.querySelector('.comet-connections');
-  const columns = container?.querySelectorAll('.comet-column');
-  if (!svg || !columns.length) return;
-  const bounds = container.getBoundingClientRect();
-  const viewport = columns[0].querySelector('.comet-column__list').getBoundingClientRect();
-  const lastColumn = columns[columns.length - 1];
-  const width = lastColumn.offsetLeft + lastColumn.offsetWidth;
-  svg.style.top = `${viewport.top - bounds.top + container.scrollTop}px`;
-  svg.setAttribute('width', width);
-  svg.setAttribute('height', viewport.height);
-  const paths = [];
-  for (let depth = 1; depth < columns.length; depth++) {
-    const sponsor = columns[depth - 1].querySelector('.comet-column__comet--centered .comet-column__name');
-    if (!sponsor) continue;
-    const from = sponsor.getBoundingClientRect();
-    for (const button of columns[depth].querySelectorAll('.comet-column__comet')) {
-      // Row appearance tracks selection/distance without button hover.
-      const appearance = getComputedStyle(button.parentElement);
-      const opacity = Number(appearance.opacity);
-      if (opacity < 0.01) continue;
-      const to = button.querySelector('.comet-column__name').getBoundingClientRect();
-      const x1 = from.right - bounds.left + container.scrollLeft + 8;
-      const y1 = (from.top + from.bottom) / 2 - viewport.top;
-      const x2 = to.left - bounds.left + container.scrollLeft - 8;
-      const y2 = (to.top + to.bottom) / 2 - viewport.top;
-      // Curve nearer the sponsor, with a short flat approach to the sponsee.
-      const span = x2 - x1;
-      const turnX = x1 + span * 0.28;
-      const flatX = x1 + span * 0.68;
-      const path = document.createElementNS(svg.namespaceURI, 'path');
-      // Avoid a redundant curve/line join on the aligned connection;
-      // its stroke can leave a small rasterization seam near the label.
-      path.setAttribute('d', Math.abs(y2 - y1) < 0.5
-        ? `M ${x1} ${y1} L ${x2} ${y2}`
-        : `M ${x1} ${y1} C ${turnX} ${y1}, ${turnX} ${y2}, ${flatX} ${y2} H ${x2}`);
-      path.setAttribute('opacity', opacity);
-      path.style.stroke = appearance.color;
-      path.setAttribute('class', 'comet-connection');
-      paths.push(path);
-    }
+// Stable noise gives clusters and curves an organic shape without moving
+// them on every selection, refresh, or peer-data response.
+function cometLayoutNoise(key) {
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index++) {
+    hash = Math.imul(hash ^ key.charCodeAt(index), 16777619);
   }
-  svg.replaceChildren(...paths);
+  return (hash >>> 0) / 4294967296;
 }
 
-function scheduleCometConnections() {
-  cometConnectionsUntil = performance.now() + 220;
-  if (cometConnectionsFrame !== null) return;
-  const draw = () => {
-    cometConnectionsFrame = null;
-    drawCometConnections();
-    if (performance.now() < cometConnectionsUntil &&
-        !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      cometConnectionsFrame = requestAnimationFrame(draw);
-    }
-  };
-  cometConnectionsFrame = requestAnimationFrame(draw);
-}
-
-addEventListener('resize', scheduleCometConnections);
-
-// Keep gesture state on the retained DOM column across selection renders.
-const cometScrollGestures = new WeakMap();
-
-function scrollCometColumn(column, depth, delta) {
-  const gesture = cometScrollGestures.get(column) ?? { delta: 0, at: 0, flippedAt: -Infinity };
-  const now = performance.now();
-  if (now - gesture.at > 180 || Math.sign(delta) !== Math.sign(gesture.delta)) {
-    gesture.delta = 0;
-  }
-  gesture.at = now;
-  gesture.delta += delta;
-  cometScrollGestures.set(column, gesture);
-  if (Math.abs(gesture.delta) < 40 || now - gesture.flippedAt < 120) return;
-
-  const direction = Math.sign(gesture.delta);
-  gesture.delta = 0;
-  gesture.flippedAt = now;
-  const current = cometColumns(explorerState)[depth];
-  if (current) centerComet(depth, current.centered + direction);
-}
-
-function CometColumn({ comets, centered, selectionActive }, depth) {
-  const key = `comet-column:${depth}`;
-  const flipButton = (direction) => {
-    const index = centered + direction;
-    const disabled = index < 0 || index >= comets.length;
-    return listen(element('button', {
-      key: `${key}:flip:${direction}`,
-      className: 'comet-column__arrow',
-      text: direction < 0 ? '▲' : '▼',
-      attributes: {
-        type: 'button',
-        'aria-label': `${direction < 0 ? 'Previous' : 'Next'} comet in column ${depth + 1}`,
-        ...(disabled ? { disabled: '' } : {})
+function cometClusterPoints(count, seed, reserveSponsor) {
+  const points = [];
+  const buckets = new Map();
+  const rotation = cometLayoutNoise(seed) * 2 * Math.PI;
+  // Scatter through the interior on a perturbed golden-angle spiral.
+  // Reject close neighbors to leave readable label space, without a grid.
+  for (let index = 0; points.length < count; index++) {
+    const key = `${seed}:${index}`;
+    const angle = rotation + index * 2.399963229728653 + (cometLayoutNoise(`${key}:angle`) - 0.5) * 0.7;
+    const radius = Math.sqrt(index) * (0.72 + cometLayoutNoise(`${key}:radius`) * 0.15);
+    const x = Math.cos(angle) * radius * 120;
+    const y = Math.sin(angle) * radius * 80;
+    if (reserveSponsor && Math.abs(x) < 136 && Math.abs(y) < 88) continue;
+    const bx = Math.floor(x / 128), by = Math.floor(y / 70);
+    let crowded = false;
+    for (let cx = bx - 1; cx <= bx + 1 && !crowded; cx++) {
+      for (let cy = by - 1; cy <= by + 1 && !crowded; cy++) {
+        crowded = (buckets.get(`${cx}:${cy}`) ?? []).some((other) =>
+          Math.abs(x - other.x) < 128 && Math.abs(y - other.y) < 70
+        );
       }
-    }), 'click', () => centerComet(depth, index));
-  };
-
-  const column = element('div', {
-    key,
-    className: 'comet-column',
-    attributes: { role: 'group', 'aria-label': `Sponsorship column ${depth + 1}` }
-  }, [
-    element('div', { className: 'comet-column__heading' }, [
-      element('span', { text: `${centered + 1} / ${comets.length}` })
-    ]),
-    flipButton(-1),
-    element('ul', { className: 'comet-column__list' },
-      // Offscreen neighbors keep their DOM identity while sliding into
-      // view.  The viewport clips everything beyond the five visible rows.
-      [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => {
-        const index = centered + offset;
-        const comet = comets[index];
-        if (!comet) return null;
-        const offscreen = Math.abs(offset) > 2;
-        const isSelected = offset === 0 && selectionActive;
-        return element('li', {
-          key: `${key}:comet:${comet.patp}`,
-          className: `comet-column__slot comet-column__slot--distance-${Math.min(2, Math.abs(offset))}${isSelected ? ' comet-column__slot--selected' : ''}${offscreen ? ' comet-column__slot--offscreen' : ''}`,
-          attributes: {
-            style: `transform: translateY(${(offset + 2) * 64}px)`,
-            ...(offscreen ? { 'aria-hidden': 'true' } : {})
-          }
-        }, [listen(element('button', {
-          key: `${key}:comet:${comet.patp}:button`,
-          className: `comet-column__comet${offset === 0 ? ' comet-column__comet--centered' : ''}${isSelected ? ' comet-column__comet--selected' : ''}`,
-          attributes: {
-            type: 'button',
-            'aria-pressed': isSelected ? 'true' : 'false',
-            ...(offscreen ? { tabindex: '-1' } : {}),
-            title: comet.patp
-          }
-        }, [element('span', {
-          className: 'comet-column__name',
-          text: truncateCometPatp(comet.patp)
-        })]), 'click', () => selectComet(depth, index))]);
-      })
-    ),
-    flipButton(1)
-  ]);
-  listen(column, 'wheel', (event) => {
-    // Leave horizontal trackpad gestures and browser pinch zoom alone.
-    if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-    if (!event.deltaY) return;
-    event.preventDefault();
-    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? event.currentTarget.clientHeight : 1;
-    scrollCometColumn(event.currentTarget, depth, event.deltaY * unit);
-  }, { passive: false });
-
-  listen(column, 'touchstart', (event) => {
-    if (event.touches.length !== 1) return;
-    const touch = event.touches[0];
-    cometScrollGestures.set(event.currentTarget, {
-      delta: 0, at: 0, flippedAt: -Infinity,
-      touch: { id: touch.identifier, x: touch.clientX, y: touch.clientY, lastY: touch.clientY, axis: null }
-    });
-  }, { passive: true });
-  listen(column, 'touchmove', (event) => {
-    const gesture = cometScrollGestures.get(event.currentTarget);
-    if (!gesture?.touch || event.touches.length !== 1) return;
-    const touch = event.touches[0];
-    const start = gesture.touch;
-    if (touch.identifier !== start.id) return;
-    if (!start.axis) {
-      const dx = Math.abs(touch.clientX - start.x);
-      const dy = Math.abs(touch.clientY - start.y);
-      if (Math.max(dx, dy) < 8) return;
-      start.axis = dy > dx ? 'vertical' : 'horizontal';
     }
-    if (start.axis !== 'vertical') return;
-    event.preventDefault();
-    const delta = start.lastY - touch.clientY;
-    start.lastY = touch.clientY;
-    scrollCometColumn(event.currentTarget, depth, delta);
-  }, { passive: false });
-  const endTouch = (event) => {
-    const gesture = cometScrollGestures.get(event.currentTarget);
-    // A swipe must not also activate the comet button under the finger.
-    if (gesture?.touch?.axis === 'vertical' && event.cancelable) event.preventDefault();
-    if (gesture) delete gesture.touch;
-  };
-  listen(column, 'touchend', endTouch, { passive: false });
-  listen(column, 'touchcancel', endTouch, { passive: false });
+    if (crowded) continue;
+    const point = { x, y };
+    points.push(point);
+    const bucket = `${bx}:${by}`;
+    if (!buckets.has(bucket)) buckets.set(bucket, []);
+    buckets.get(bucket).push(point);
+  }
+  return points;
+}
 
-  return listen(column, 'keydown', (event) => {
-    const index = {
-      ArrowUp: centered - 1,
-      ArrowDown: centered + 1,
-      Home: 0,
-      End: comets.length - 1
-    }[event.key];
-    if (index === undefined) return;
-    event.preventDefault();
-    centerComet(depth, index);
+function cometConnectionPath(source, target) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const key = `${source.comet.patp}:${target.comet.patp}`;
+  const bend = Math.min(70, distance * 0.3);
+  const first = (cometLayoutNoise(`${key}:first`) - 0.5) * bend * 2;
+  const second = (cometLayoutNoise(`${key}:second`) - 0.5) * bend * 2;
+  const fraction = 0.2 + cometLayoutNoise(`${key}:fraction`) * 0.2;
+  const c1x = source.x + dx * fraction - dy / distance * first;
+  const c1y = source.y + dy * fraction + dx / distance * first;
+  const c2x = target.x - dx * 0.25 - dy / distance * second;
+  const c2y = target.y - dy * 0.25 + dx / distance * second;
+  return `M ${source.x} ${source.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${target.x} ${target.y}`;
+}
+
+function layoutCometGraph(roots) {
+  if (cometGraphLayouts.has(roots)) return cometGraphLayouts.get(roots);
+  const nodes = [];
+  const edges = [];
+  const clusters = [];
+  for (const root of roots) {
+    const queue = [{ comet: root, x: 0, y: 0, topLevel: true }];
+    for (let index = 0; index < queue.length; index++) {
+      const sponsor = queue[index];
+      const children = [...sponsor.comet.sponsees].sort((a, b) =>
+        cometLayoutNoise(a.patp) - cometLayoutNoise(b.patp)
+      );
+      const leaves = children.filter((comet) => !comet.sponsees.length);
+      // Every sponsor anchors its own cluster.  Nested sponsors have no
+      // placeholder node or reserved seat in their parent's leaf cluster.
+      const points = cometClusterPoints(leaves.length, sponsor.comet.patp, true);
+      const members = [sponsor];
+      let leafIndex = 0;
+      for (const comet of children) {
+        const child = { comet, x: 0, y: 0, topLevel: false };
+        edges.push({ source: sponsor, target: child });
+        if (comet.sponsees.length) {
+          queue.push(child);
+        } else {
+          child.x = points[leafIndex].x;
+          child.y = points[leafIndex].y;
+          leafIndex++;
+          members.push(child);
+        }
+      }
+      let radiusX = 0, radiusY = 0;
+      for (const node of members) {
+        radiusX = Math.max(radiusX, Math.abs(node.x));
+        radiusY = Math.max(radiusY, Math.abs(node.y));
+      }
+      clusters.push({
+        owner: sponsor.comet.patp, members,
+        width: radiusX * 2 + 176, height: radiusY * 2 + 144
+      });
+    }
+  }
+
+  // Top-level and nested sponsor families use the same plot packing.
+  // Families of a root are queued together, keeping their hubs nearby;
+  // the parent-child edge bridges plots instead of spanning a leaf cloud.
+  const plots = [];
+  const columns = Math.max(1, Math.ceil(Math.sqrt(clusters.length)));
+  const outerMargin = 128;
+  let x = outerMargin, y = outerMargin, rowHeight = 0, width = 0;
+  clusters.forEach((cluster, index) => {
+    if (index && index % columns === 0) {
+      x = outerMargin;
+      y += rowHeight + 56;
+      rowHeight = 0;
+    }
+    const centerX = x + cluster.width / 2;
+    const centerY = y + cluster.height / 2;
+    for (const node of cluster.members) {
+      node.x += centerX;
+      node.y += centerY;
+      nodes.push(node);
+    }
+    plots.push({ owner: cluster.owner, x: centerX, y: centerY, width: cluster.width, height: cluster.height });
+    x += cluster.width + 56;
+    width = Math.max(width, x - 56 + outerMargin);
+    rowHeight = Math.max(rowHeight, cluster.height);
   });
+  // All hub coordinates must be placed before generating cross-plot paths.
+  for (const edge of edges) edge.path = cometConnectionPath(edge.source, edge.target);
+  const layout = { nodes, edges, plots, width: Math.max(800, width), height: Math.max(480, y + rowHeight + outerMargin) };
+  cometGraphLayouts.set(roots, layout);
+  return layout;
+}
+
+function CometNetworkGraph(state) {
+  const layout = layoutCometGraph(state.cometSponsorshipGraph);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('data-render-key', 'comet-network:lines');
+  svg.setAttribute('class', 'comet-network__lines');
+  svg.setAttribute('width', layout.width);
+  svg.setAttribute('height', layout.height);
+  svg.setAttribute('aria-hidden', 'true');
+  for (const { source, target, path } of layout.edges) {
+    const line = document.createElementNS(svg.namespaceURI, 'path');
+    line.setAttribute('data-render-key', `edge:${source.comet.patp}:${target.comet.patp}`);
+    line.setAttribute('d', path);
+    line.setAttribute('class', `comet-network__edge${[source.comet.patp, target.comet.patp].includes(state.selectedCometPatp) ? ' comet-network__edge--selected' : ''}`);
+    svg.append(line);
+  }
+  const plane = element('div', {
+    key: 'comet-network:plane', className: 'comet-network__plane',
+    attributes: { style: `width: ${layout.width}px; height: ${layout.height}px` }
+  }, [svg, ...layout.nodes.map(({ comet, x, y, topLevel }) => {
+    const selected = comet.patp === state.selectedCometPatp;
+    return listen(element('button', {
+      key: `comet-node:${comet.patp}`,
+      className: `comet-network__node${comet.sponsees.length ? ' comet-network__node--hub' : ''}${topLevel ? ' comet-network__node--top-level' : ''}${selected ? ' comet-network__node--selected' : ''}`,
+      attributes: {
+        type: 'button', title: comet.patp,
+        'aria-label': `Select ${comet.patp}`, 'aria-pressed': String(selected),
+        style: `left: ${x}px; top: ${y}px`
+      }
+    }, [
+      element('span', { className: 'comet-network__circle', attributes: { 'aria-hidden': 'true' } }),
+      element('span', { className: 'comet-network__name', text: truncateCometPatp(comet.patp) })
+    ]), 'click', () => selectComet(comet.patp));
+  })]);
+  const viewport = element('div', {
+    key: 'comet-network', className: 'comet-network',
+    attributes: { tabindex: '0', role: 'region', 'aria-label': 'Comet network graph. Scroll or drag to explore.' }
+  }, [plane]);
+  listen(viewport, 'pointerdown', (event) => {
+    if (event.pointerType === 'touch' || event.button !== 0) return;
+    cometGraphDrags.set(event.currentTarget, {
+      id: event.pointerId, x: event.clientX, y: event.clientY,
+      left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop, moved: false
+    });
+  });
+  listen(viewport, 'pointermove', (event) => {
+    const drag = cometGraphDrags.get(event.currentTarget);
+    if (!drag || drag.id !== event.pointerId) return;
+    if (!event.buttons) { cometGraphDrags.delete(event.currentTarget); return; }
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.currentTarget.scrollLeft = drag.left - dx;
+    event.currentTarget.scrollTop = drag.top - dy;
+  });
+  const endDrag = (event) => {
+    const drag = cometGraphDrags.get(event.currentTarget);
+    if (!drag) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag.moved) drag.suppressClickUntil = performance.now() + 400;
+    drag.id = null;
+  };
+  listen(viewport, 'pointerup', endDrag);
+  listen(viewport, 'pointercancel', endDrag);
+  listen(viewport, 'click', (event) => {
+    const drag = cometGraphDrags.get(event.currentTarget);
+    if (drag?.suppressClickUntil > performance.now()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, { capture: true });
+  return viewport;
 }
 
 function formatCometFief(fief) {
@@ -3719,47 +3688,43 @@ function CometPeerDetails(patp, state) {
   ]);
 }
 
-function CometPanel(state) {
-  const columns = cometColumns(state);
-  const selectedColumn = columns.filter(({ selectionActive }) => selectionActive).at(-1);
-  const selectedComet = selectedColumn?.comets[selectedColumn.centered];
-  return element('section', {
-    key: 'comet-panel',
-    className: 'panel comet-panel',
-    attributes: { 'aria-label': 'Comet sponsorship hierarchy' }
+function CometIdentityPanel(state) {
+  return element('header', {
+    key: 'comet-identity-panel', className: 'panel comet-identity-panel',
+    attributes: { 'aria-label': 'Your comet' }
   }, [
-    element('header', { className: 'panel__header' }, [
-      element('h2', { className: 'comet-panel__title', text: state.observatoryOur?.patp ?? our ?? '' })
-    ]),
-    element('div', { key: 'comet-panel:body', className: 'comet-panel__body' }, [
-      element('div', { key: 'comet-panel:graph', className: 'comet-panel__graph' }, [
-        columns.length
-          ? element('div', { key: 'comet-columns', className: 'comet-columns' }, [
-              CometConnections(),
-              ...columns.map(CometColumn)
-            ])
-          : element('p', {
-              key: 'comet-panel:status',
-              className: 'comet-panel__status',
-              attributes: { role: 'status' },
-              text: state.cometScryError ?? (state.cometSponsorshipGraph === null
-                ? 'Loading comets…'
-                : 'No comets found.')
-            })
-      ]),
-      element('section', {
-        key: 'comet-panel:details',
-        className: 'comet-panel__details',
-        attributes: { 'aria-label': 'Selected comet details' }
-      }, [
-        element('p', {
-          key: 'comet-panel:selected-name',
-          className: 'comet-panel__selected-name',
-          text: selectedComet?.patp ?? 'No comet selected.'
-        }),
-        CometPeerDetails(selectedComet?.patp, state)
-      ])
-    ])
+    element('h2', { className: 'comet-identity-panel__name', text: state.observatoryOur?.patp ?? our ?? '' })
+  ]);
+}
+
+function CometGraphPanel(state) {
+  return element('section', {
+    key: 'comet-graph-panel', className: 'panel comet-graph-panel',
+    attributes: { 'aria-label': 'Comet sponsorship graph' }
+  }, [
+    state.cometSponsorshipGraph?.length
+      ? CometNetworkGraph(state)
+      : element('p', {
+          key: 'comet-graph:status', className: 'comet-graph-panel__status',
+          attributes: { role: 'status' },
+          text: state.cometScryError ?? (state.cometSponsorshipGraph === null
+            ? 'Loading comets…'
+            : 'No comets found.')
+        })
+  ]);
+}
+
+function CometDetailsPanel(state) {
+  const selectedPatp = state.selectedCometPatp;
+  return element('section', {
+    key: 'comet-details-panel', className: 'panel comet-details-panel',
+    attributes: { 'aria-label': 'Selected comet details' }
+  }, [
+    element('p', {
+      key: 'comet-details:selected-name', className: 'comet-details-panel__name',
+      text: selectedPatp ?? 'No comet selected.'
+    }),
+    CometPeerDetails(selectedPatp, state)
   ]);
 }
 
@@ -3773,7 +3738,9 @@ function ExplorerApp(state) {
     key: 'explorer',
     className: 'explorer'
   }, [
-    CometPanel(state),
+    CometIdentityPanel(state),
+    CometGraphPanel(state),
+    CometDetailsPanel(state),
     BlockHeaderPanel(visibleHeaders(state), selectedBlock),
     element('section', {
       key: 'explorer-lower-region',
