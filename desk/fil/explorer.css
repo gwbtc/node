@@ -119,13 +119,62 @@ dd {
 }
 
 .comet-identity-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
   padding: 12px 22px;
 }
 
 .comet-identity-panel__name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 200px;
+  min-width: 0;
   font-size: 0.95rem;
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.comet-identity-panel__logo {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.comet-identity-panel__name span {
+  min-width: 0;
+}
+
+.network-page-tabs {
+  display: flex;
+  flex: none;
+  gap: 12px;
+}
+
+.network-page-tab {
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--explorer-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.network-page-tab[aria-selected="true"] {
+  border-bottom-color: #70c5a7;
+  color: #70c5a7;
+}
+
+.network-page-tab:hover {
+  color: var(--explorer-text);
+}
+
+.network-page {
+  margin-top: 20px;
 }
 
 .comet-graph-panel__status {
@@ -140,8 +189,6 @@ dd {
 
 .comet-details-panel {
   min-width: 0;
-  max-height: 440px;
-  overflow-y: auto;
   padding: 22px;
 }
 

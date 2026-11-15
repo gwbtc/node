@@ -17,6 +17,10 @@ const dirtyNetworkTabs = new Set();
 let syncStatusRevision = 0;
 
 const explorerState = {
+  networkPage: 'urbit',
+  cometGraphScroll: null,
+  bitcoinHeaderScrollAnchor: null,
+  bitcoinHeaderAtStart: true,
   network: null,
   shipReconnecting: false,
   config: null,
@@ -107,7 +111,7 @@ addEventListener('DOMContentLoaded', async () => {
 function handleConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) return;
   explorerState.config = config;
-  if (explorerState.selectedTab.type === 'config') renderExplorer();
+  if (explorerState.selectedTab.type === 'config') renderBitcoinExplorer();
 }
 
 async function scryObservatoryOur() {
@@ -142,7 +146,7 @@ async function scryComets() {
     explorerState.cometScryError = 'Unable to load comets from Observatory.';
     console.error('Unable to load Observatory comets:', error);
   }
-  renderExplorer();
+  renderUrbitExplorer();
 }
 
 async function scryCometPeer(patp) {
@@ -169,7 +173,7 @@ async function scryCometPeer(patp) {
     explorerState.pendingCometPeers.delete(patp);
     // An older response may populate its cache, but never replaces the
     // details belonging to the comet the user has since selected.
-    if (explorerState.selectedCometPatp === patp) renderExplorer();
+    if (explorerState.selectedCometPatp === patp) renderUrbitExplorer();
   }
 }
 
@@ -238,7 +242,7 @@ async function scryNetwork() {
     if (network !== 'mainnet' && network !== 'regtest') return false;
 
     explorerState.network = network;
-    renderExplorer();
+    renderBitcoinExplorer();
     return true;
   } catch {
     return false;
@@ -258,13 +262,13 @@ async function connectToShip() {
   eventSource.addEventListener('error', () => {
     if (eventSource.readyState !== EventSource.CONNECTING || explorerState.shipReconnecting) return;
     explorerState.shipReconnecting = true;
-    renderExplorer();
+    renderBitcoinExplorer();
   });
   eventSource.addEventListener('open', () => {
     refreshIsSynced();
     if (!explorerState.shipReconnecting) return;
     explorerState.shipReconnecting = false;
-    renderExplorer();
+    renderBitcoinExplorer();
   });
   updateBestFilterHeaderPolling();
 }
@@ -338,15 +342,18 @@ function cachePeer(address, info) {
 }
 
 function updateStatusModule() {
+  if (explorerState.networkPage !== 'bitcoin') return;
   const status = document.querySelector('[data-render-key="status-module"]');
   if (status) reconcileNode(status, StatusModule());
 }
 
 function scheduleNetworkPanelRender(tabs) {
+  if (explorerState.networkPage !== 'bitcoin') return;
   for (const tab of tabs) dirtyNetworkTabs.add(tab);
   if (networkPanelFrame !== null) return;
   networkPanelFrame = requestAnimationFrame(() => {
     networkPanelFrame = null;
+    if (explorerState.networkPage !== 'bitcoin') return;
     const tab = explorerState.selectedTab.type;
     const needsRender = dirtyNetworkTabs.has(tab);
     dirtyNetworkTabs.clear();
@@ -488,7 +495,7 @@ function handleIsSynced(isSynced) {
   }
 
   updateBestFilterHeaderPolling();
-  if (syncStatusChanged) renderExplorer();
+  if (syncStatusChanged) renderBitcoinExplorer();
   else updateStatusModule();
 }
 
@@ -626,7 +633,7 @@ async function pollBestFilterHeader() {
 
     explorerState.bestFilterHeader = { height, hash };
     requestPendingFilterHeaders();
-    renderExplorer();
+    renderBitcoinExplorer();
   } catch {
     // A later poll will retry until syncing is complete and both tips match.
   } finally {
@@ -637,7 +644,7 @@ async function pollBestFilterHeader() {
 
 function headerRowIsAtStart() {
   const row = document.querySelector('.block-header-row');
-  return !row || row.scrollLeft <= 1;
+  return row ? row.scrollLeft <= 1 : explorerState.bitcoinHeaderAtStart;
 }
 
 function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
@@ -688,7 +695,7 @@ function handleBestBlock(bestBlockJson, { requireVisibleTip = false } = {}) {
       requireVisibleTip ? null : captureHeaderScrollAnchor()
     );
   } else {
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 
   const mayBeReorg = previousBestBlock &&
@@ -746,7 +753,7 @@ function handleBlockHeader(headerJson) {
     const pendingSearch = explorerState.pendingHeaderSearch;
     explorerState.pendingHeaderSearch = null;
     explorerState.headerSearchError = 'Unknown block hash';
-    renderExplorer(pendingSearch?.scrollAnchor ?? null);
+    renderBitcoinExplorer(pendingSearch?.scrollAnchor ?? null);
     return;
   }
 
@@ -774,7 +781,7 @@ function handleBlockHeader(headerJson) {
     return;
   }
 
-  if (headerWindowHasHeight(height)) renderExplorer();
+  if (headerWindowHasHeight(height)) renderBitcoinExplorer();
 }
 
 async function scryBlockHeader(path) {
@@ -802,7 +809,7 @@ function handleHeaderScryError(type, value) {
 
   explorerState.pendingHeaderSearch = null;
   explorerState.headerSearchError = 'Unable to load block header';
-  renderExplorer(pendingSearch.scrollAnchor ?? null);
+  renderBitcoinExplorer(pendingSearch.scrollAnchor ?? null);
 }
 
 async function scryBlockHeaderByHeight(height) {
@@ -900,7 +907,7 @@ function setHeaderWindow(
     headerWindow.lowestHeight,
     headerWindow.highestHeight
   );
-  renderExplorer(scrollAnchor);
+  renderBitcoinExplorer(scrollAnchor);
 }
 
 function headerWindowHasHeight(height) {
@@ -1014,7 +1021,7 @@ function handleHeaderSearch(event) {
     value,
     scrollAnchor: captureHeaderScrollAnchor()
   };
-  renderExplorer(null);
+  renderBitcoinExplorer(null);
 
   if (type === 'height') {
     requestHeaderRange(value, value);
@@ -1050,7 +1057,7 @@ function handleBlock(blockJson) {
   explorerState.pendingBlocks.delete(blockInfo['block-hash']);
 
   if (getSelectedBlock()?.hash === blockInfo['block-hash']) {
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -1062,7 +1069,7 @@ function getSelectedBlock(state = explorerState) {
 
 function selectBlock(header) {
   setSelectedBlock(header);
-  renderExplorer();
+  renderBitcoinExplorer();
 }
 
 function setSelectedBlock(header) {
@@ -1167,6 +1174,7 @@ function navigateHeaderWindow(direction, row) {
 }
 
 function scheduleViewedHeaderUpdate() {
+  if (explorerState.networkPage !== 'bitcoin') return;
   if (headerViewedFrame !== null) return;
   headerViewedFrame = requestAnimationFrame(() => {
     headerViewedFrame = null;
@@ -1175,6 +1183,7 @@ function scheduleViewedHeaderUpdate() {
 }
 
 function updateViewedHeaderHeight() {
+  if (explorerState.networkPage !== 'bitcoin') return;
   const row = document.querySelector('.block-header-row');
   if (!row || row.clientWidth === 0) return;
   const bounds = row.getBoundingClientRect();
@@ -1260,7 +1269,7 @@ function selectBestBlock() {
       value: bestBlock.height,
       scrollAnchor: captureHeaderScrollAnchor()
     };
-    renderExplorer(null);
+    renderBitcoinExplorer(null);
     requestHeaderRange(bestBlock.height, bestBlock.height);
     return;
   }
@@ -1268,7 +1277,7 @@ function selectBestBlock() {
   setSelectedBlock(header);
 
   if (explorerState.headerWindow?.highestHeight === bestBlock.height) {
-    renderExplorer(null);
+    renderBitcoinExplorer(null);
     scrollHeaderRowToStart();
   } else {
     centerHeaderWindow(bestBlock.height);
@@ -1355,7 +1364,7 @@ async function disconnectPeer(peer) {
       : new Date(ban.expiration).getTime() - Date.now();
     if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
       ban.error = 'Invalid time.';
-      renderExplorer();
+      renderBitcoinExplorer();
       return;
     }
     action = 'ban-peer';
@@ -1368,7 +1377,7 @@ async function disconnectPeer(peer) {
   }
 
   explorerState.pendingPeerDisconnects.add(peer.key);
-  renderExplorer();
+  renderBitcoinExplorer();
 
   try {
     const response = await sendActions([
@@ -1381,7 +1390,7 @@ async function disconnectPeer(peer) {
     console.error(error);
     explorerState.pendingPeerDisconnects.delete(peer.key);
     if (isBanning) ban.error = 'Unable to ban peer. Please try again.';
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -1400,6 +1409,16 @@ function makeChannelDelete() {
     id: channelActId,
     action: 'delete'
   };
+}
+
+// Background Bitcoin scries/subscriptions keep caches current without
+// rebuilding the Urbit page.  Observatory updates follow the same rule.
+function renderBitcoinExplorer(...args) {
+  if (explorerState.networkPage === 'bitcoin') renderExplorer(...args);
+}
+
+function renderUrbitExplorer(...args) {
+  if (explorerState.networkPage === 'urbit') renderExplorer(...args);
 }
 
 function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
@@ -1422,7 +1441,10 @@ function renderExplorer(scrollAnchor = captureHeaderScrollAnchor()) {
   if (!hadCometGraph) {
     const viewport = document.querySelector('.comet-network');
     const selected = viewport?.querySelector('.comet-network__node--selected');
-    if (selected) {
+    if (viewport && explorerState.cometGraphScroll) {
+      viewport.scrollLeft = explorerState.cometGraphScroll.left;
+      viewport.scrollTop = explorerState.cometGraphScroll.top;
+    } else if (selected) {
       viewport.scrollLeft = selected.offsetLeft - viewport.clientWidth / 2;
       viewport.scrollTop = selected.offsetTop - viewport.clientHeight / 2;
     }
@@ -1593,6 +1615,7 @@ function reconcileNode(currentNode, nextNode) {
 }
 
 function updateFilterHeaderLine(height) {
+  if (explorerState.networkPage !== 'bitcoin') return;
   const card = document.querySelector(
     `.block-header-card[data-block-height="${height}"]`
   );
@@ -2045,7 +2068,7 @@ function changeTransactionPage(page, pageCount) {
   explorerState.blockTransactionPages.set(
     block.hash, Math.max(0, Math.min(page, pageCount - 1))
   );
-  renderExplorer();
+  renderBitcoinExplorer();
 }
 
 function TransactionPaginationButton(key, label, text, disabled, onClick) {
@@ -2362,7 +2385,7 @@ function BanControls(peer, actionButton, {
     listen(input, 'change', (event) => {
       onChange(event.currentTarget.checked);
       draft.error = null;
-      renderExplorer();
+      renderBitcoinExplorer();
     });
     return element('label', {
       key: `${formKey}:${name}`,
@@ -2449,7 +2472,7 @@ function PeerCard(peer) {
   listen(settingsButton, 'click', () => {
     if (explorerState.peerSettingsOpen.has(key)) explorerState.peerSettingsOpen.delete(key);
     else explorerState.peerSettingsOpen.add(key);
-    renderExplorer();
+    renderBitcoinExplorer();
   });
   const disconnectButton = element('button', {
     key: `${peerRenderKey}:disconnect`,
@@ -2578,7 +2601,7 @@ async function connectAddress(entry) {
       explorerState.peers?.has(entry.key)) return;
 
   explorerState.pendingPeerConnects.add(entry.key);
-  renderExplorer();
+  renderBitcoinExplorer();
   try {
     const response = await sendActions([
       makeBitcoinClientAction('connect-peer', earthAddressJson(entry.address))
@@ -2590,7 +2613,7 @@ async function connectAddress(entry) {
     console.error(error);
   } finally {
     explorerState.pendingPeerConnects.delete(entry.key);
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -2607,7 +2630,7 @@ async function removeAddress(entry) {
       : new Date(ban.expiration).getTime() - Date.now();
     if (expiration !== null && (!Number.isSafeInteger(expiration) || expiration <= 0)) {
       ban.error = 'Invalid time.';
-      renderExplorer();
+      renderBitcoinExplorer();
       return;
     }
     action = 'ban-peer';
@@ -2615,7 +2638,7 @@ async function removeAddress(entry) {
   }
 
   explorerState.pendingAddressRemovals.add(entry.key);
-  renderExplorer();
+  renderBitcoinExplorer();
   try {
     const response = await sendActions([makeBitcoinClientAction(action, payload)]);
     if (!response.ok) {
@@ -2626,7 +2649,7 @@ async function removeAddress(entry) {
     if (isBanning) ban.error = 'Unable to ban address. Please try again.';
   } finally {
     explorerState.pendingAddressRemovals.delete(entry.key);
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -2649,7 +2672,7 @@ function AddressCard(entry, peer = null) {
   listen(settingsButton, 'click', () => {
     if (explorerState.addressSettingsOpen.has(key)) explorerState.addressSettingsOpen.delete(key);
     else explorerState.addressSettingsOpen.add(key);
-    renderExplorer();
+    renderBitcoinExplorer();
   });
   const isConnecting = explorerState.pendingPeerConnects.has(key);
   const connectButton = element('button', {
@@ -2713,7 +2736,7 @@ function AddressCard(entry, peer = null) {
 async function unbanPeer(entry) {
   if (explorerState.pendingPeerUnbans.has(entry.key)) return;
   explorerState.pendingPeerUnbans.add(entry.key);
-  renderExplorer();
+  renderBitcoinExplorer();
   try {
     const response = await sendActions([
       makeBitcoinClientAction('unban-peer', earthAddressJson(entry.address))
@@ -2724,7 +2747,7 @@ async function unbanPeer(entry) {
   } catch (error) {
     console.error(error);
     explorerState.pendingPeerUnbans.delete(entry.key);
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -2754,7 +2777,7 @@ function BlacklistCard(entry) {
   listen(settingsButton, 'click', () => {
     if (explorerState.blacklistSettingsOpen.has(key)) explorerState.blacklistSettingsOpen.delete(key);
     else explorerState.blacklistSettingsOpen.add(key);
-    renderExplorer();
+    renderBitcoinExplorer();
   });
   const duration = info.expiration === null || info.expiration === undefined
     ? 'Permanent'
@@ -2788,7 +2811,7 @@ function BlacklistCard(entry) {
 function selectPeerPanelTab(tab, focus = false) {
   if (explorerState.selectedTab.type === tab) return;
   explorerState.selectedTab = { type: tab };
-  renderExplorer();
+  renderBitcoinExplorer();
   if (focus) {
     requestAnimationFrame(() => {
       document.getElementById(`peers-panel-tab-${tab}`)?.focus();
@@ -2858,7 +2881,7 @@ function changePeerPanelPage(tab, page, pageCount) {
     0,
     Math.min(page, pageCount - 1)
   );
-  renderExplorer();
+  renderBitcoinExplorer();
 }
 
 function peerPageStateKey(tab) {
@@ -2967,19 +2990,19 @@ async function submitPeerConnect() {
     address.port = Number(port);
   } catch (error) {
     explorerState.peerConnectError = error.message;
-    renderExplorer();
+    renderBitcoinExplorer();
     return;
   }
   const key = peerKey(address);
   if (explorerState.peers?.has(key) || explorerState.pendingPeerConnects.has(key)) {
     explorerState.peerConnectError = 'Already connected or connecting to this address.';
-    renderExplorer();
+    renderBitcoinExplorer();
     return;
   }
 
   explorerState.peerConnectPending = true;
   explorerState.pendingPeerConnects.add(key);
-  renderExplorer();
+  renderBitcoinExplorer();
   try {
     const response = await sendActions([
       makeBitcoinClientAction('connect-peer', address)
@@ -2990,7 +3013,7 @@ async function submitPeerConnect() {
   } finally {
     explorerState.peerConnectPending = false;
     explorerState.pendingPeerConnects.delete(key);
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -3205,7 +3228,7 @@ function closeBlockTab(hash) {
   } else {
     explorerState.selectedTab = { type: 'config' };
   }
-  renderExplorer();
+  renderBitcoinExplorer();
   document.getElementById(
     nextHash ? `block-tab-${nextHash}` : 'peers-panel-tab-config'
   )?.focus();
@@ -3285,14 +3308,14 @@ async function saveConfig() {
     } else {
       if (!/^[0-9]+$/.test(input) || !Number.isSafeInteger(Number(input))) {
         explorerState.configSaveError = 'Targets and cache ranges must be non-negative whole numbers within the supported range.';
-        renderExplorer();
+        renderBitcoinExplorer();
         return;
       }
       values[name] = Number(input);
     }
   }
   explorerState.configSaving = true;
-  renderExplorer();
+  renderBitcoinExplorer();
   try {
     const response = await sendActions([
       makeBitcoinClientAction('configure', configActionFields.map((name) => ({ [name]: values[name] })))
@@ -3303,7 +3326,7 @@ async function saveConfig() {
     explorerState.configSaveError = error.message;
   } finally {
     explorerState.configSaving = false;
-    renderExplorer();
+    renderBitcoinExplorer();
   }
 }
 
@@ -3321,7 +3344,7 @@ function ConfigPanel(state) {
     button('Cancel', () => {
       explorerState.configDraft = null;
       explorerState.configSaveError = null;
-      renderExplorer();
+      renderBitcoinExplorer();
     }),
     button(state.configSaving ? 'Saving…' : 'Save', null, 'submit')
   ] : [button('Edit', () => {
@@ -3329,7 +3352,7 @@ function ConfigPanel(state) {
       name, name === 'verb' ? state.config.verb === true : String(state.config[name])
     ]));
     explorerState.configSaveError = null;
-    renderExplorer();
+    renderBitcoinExplorer();
   })];
   const form = element('form', { key: 'config-panel:form' }, [
     state.config && element('div', {
@@ -3368,7 +3391,7 @@ function ConfigPanel(state) {
             });
             if (input && name === 'verb') listen(input, 'click', () => {
               explorerState.configDraft.verb = !explorerState.configDraft.verb;
-              renderExplorer();
+              renderBitcoinExplorer();
             });
             else if (input) listen(input, 'input', (event) => {
               explorerState.configDraft[name] = event.currentTarget.value;
@@ -3398,7 +3421,7 @@ function ConfigPanel(state) {
 function selectComet(patp) {
   explorerState.selectedCometPatp = patp;
   scryCometPeer(patp);
-  renderExplorer();
+  renderUrbitExplorer();
 }
 
 function truncateCometPatp(patp) {
@@ -3641,7 +3664,7 @@ function CometPeerDetails(patp, state) {
         className: 'comet-peer__retry', text: 'Retry', attributes: { type: 'button' }
       }), 'click', () => {
         scryCometPeer(patp);
-        renderExplorer();
+        renderUrbitExplorer();
       })
     ]);
   }
@@ -3688,12 +3711,76 @@ function CometPeerDetails(patp, state) {
   ]);
 }
 
+function selectNetworkPage(page) {
+  if (!['urbit', 'bitcoin'].includes(page) || page === explorerState.networkPage) return;
+  if (explorerState.networkPage === 'urbit') {
+    const graph = document.querySelector('.comet-network');
+    if (graph) explorerState.cometGraphScroll = { left: graph.scrollLeft, top: graph.scrollTop };
+  } else {
+    explorerState.bitcoinHeaderScrollAnchor = captureHeaderScrollAnchor();
+    explorerState.bitcoinHeaderAtStart = headerRowIsAtStart();
+  }
+  if (networkPanelFrame !== null) {
+    cancelAnimationFrame(networkPanelFrame);
+    networkPanelFrame = null;
+  }
+  dirtyNetworkTabs.clear();
+  explorerState.networkPage = page;
+  renderExplorer(page === 'bitcoin' ? explorerState.bitcoinHeaderScrollAnchor : null);
+}
+
+function NetworkPageTab(page, label, state) {
+  const selected = state.networkPage === page;
+  const tab = listen(element('button', {
+    key: `network-page-tab:${page}`, className: 'network-page-tab', text: label,
+    attributes: {
+      type: 'button', role: 'tab', id: `network-page-tab-${page}`,
+      'aria-selected': String(selected), 'aria-controls': `network-page-${page}`,
+      tabindex: selected ? '0' : '-1'
+    }
+  }), 'click', () => selectNetworkPage(page));
+  return listen(tab, 'keydown', (event) => {
+    const destination = { ArrowLeft: page === 'urbit' ? 'bitcoin' : 'urbit',
+      ArrowRight: page === 'urbit' ? 'bitcoin' : 'urbit', Home: 'urbit', End: 'bitcoin' }[event.key];
+    if (!destination) return;
+    event.preventDefault();
+    selectNetworkPage(destination);
+    document.getElementById(`network-page-tab-${destination}`)?.focus();
+  });
+}
+
+function CometIdentityLogo() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('data-render-key', 'comet-identity-logo');
+  svg.setAttribute('class', 'comet-identity-panel__logo');
+  svg.setAttribute('viewBox', '0 0 10 10');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute('d', 'M5 0v5.6m-5 0h10m-8.35 2h6.7m-5 2h3.3');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '0.8');
+  svg.append(path);
+  return svg;
+}
+
 function CometIdentityPanel(state) {
   return element('header', {
     key: 'comet-identity-panel', className: 'panel comet-identity-panel',
     attributes: { 'aria-label': 'Your comet' }
   }, [
-    element('h2', { className: 'comet-identity-panel__name', text: state.observatoryOur?.patp ?? our ?? '' })
+    element('h2', { className: 'comet-identity-panel__name' }, [
+      CometIdentityLogo(),
+      element('span', { text: state.observatoryOur?.patp ?? our ?? '' })
+    ]),
+    element('nav', {
+      key: 'network-page-tabs', className: 'network-page-tabs',
+      attributes: { role: 'tablist', 'aria-label': 'Network pages' }
+    }, [
+      NetworkPageTab('urbit', 'Urbit Network', state),
+      NetworkPageTab('bitcoin', 'Bitcoin Network', state)
+    ])
   ]);
 }
 
@@ -3728,19 +3815,16 @@ function CometDetailsPanel(state) {
   ]);
 }
 
-function ExplorerApp(state) {
+function BitcoinNetworkPage(state) {
   const selectedBlock = getSelectedBlock(state);
   const blockData = selectedBlock
     ? state.blocks.get(selectedBlock.hash)
     : null;
 
-  return element('main', {
-    key: 'explorer',
-    className: 'explorer'
+  return element('div', {
+    key: 'network-page:bitcoin', className: 'network-page',
+    attributes: { id: 'network-page-bitcoin', role: 'tabpanel', 'aria-labelledby': 'network-page-tab-bitcoin' }
   }, [
-    CometIdentityPanel(state),
-    CometGraphPanel(state),
-    CometDetailsPanel(state),
     BlockHeaderPanel(visibleHeaders(state), selectedBlock),
     element('section', {
       key: 'explorer-lower-region',
@@ -3780,5 +3864,19 @@ function ExplorerApp(state) {
           : PeersPanel(state.peers, state.addresses, state.blacklist, state.selectedTab.type)
       ])
     ])
+  ]);
+}
+
+function UrbitNetworkPage(state) {
+  return element('div', {
+    key: 'network-page:urbit', className: 'network-page',
+    attributes: { id: 'network-page-urbit', role: 'tabpanel', 'aria-labelledby': 'network-page-tab-urbit' }
+  }, [CometGraphPanel(state), CometDetailsPanel(state)]);
+}
+
+function ExplorerApp(state) {
+  return element('main', { key: 'explorer', className: 'explorer' }, [
+    CometIdentityPanel(state),
+    state.networkPage === 'bitcoin' ? BitcoinNetworkPage(state) : UrbitNetworkPage(state)
   ]);
 }
