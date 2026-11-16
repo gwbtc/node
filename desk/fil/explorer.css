@@ -140,6 +140,7 @@ dd {
 .comet-identity-panel__logo {
   width: 20px;
   height: 20px;
+  margin-right: 0.4rem;
   flex: none;
 }
 
@@ -184,7 +185,70 @@ dd {
 }
 
 .comet-graph-panel {
+  position: relative;
   min-width: 0;
+}
+
+.comet-graph-panel__controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.comet-graph-panel__button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--explorer-border);
+  background: var(--explorer-surface);
+  color: var(--explorer-text);
+  font: 1.25rem/1 var(--explorer-mono);
+  cursor: pointer;
+}
+
+.comet-graph-panel__button:hover {
+  background: var(--explorer-raised);
+}
+
+.comet-graph-panel__button:disabled {
+  cursor: wait;
+}
+
+.comet-refresh-icon,
+.comet-name-icon {
+  display: inline-block;
+}
+
+.comet-refresh-icon--loading {
+  animation: comet-refresh-spin 800ms linear infinite;
+}
+
+.comet-refresh-icon--success,
+.comet-name-icon--pulse {
+  color: #70c5a7;
+  animation: comet-refresh-pulse 320ms ease-out;
+}
+
+@keyframes comet-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes comet-refresh-pulse {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comet-refresh-icon--loading,
+  .comet-refresh-icon--success,
+  .comet-name-icon--pulse {
+    animation: none;
+  }
 }
 
 .comet-details-panel {

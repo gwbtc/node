@@ -1,4 +1,6 @@
 /-  *observatory
+/+  nym=mnemonyms
+/*  english  %txt  /fil/wordlists/english/txt
 |%
 ::
 +$  state-0
@@ -41,7 +43,7 @@
       [%x %our ~]
     =/  dat
       ^-  our-data
-      [[our.bowl ''] gw-custody:scry]      :: NOTE: add nym
+      [[our.bowl (de:ship:me our.bowl)] gw-custody:scry]
     :+  ~  ~
     :-  %observatory-our
     !>  dat
@@ -53,12 +55,12 @@
       %+  turn  ~(tap in cuz)
       |=  who=@p
       ^-  [comet sponsor=(unit comet)]
-      :-  [who '']                       :: NOTE: add nym
+      :-  [who (de:ship:me who)]
       =/  sax  (jael-saxo:scry who)
       ?~  sax  ~
       ?~  t.sax  ~
       :-  ~
-          [i.t.sax '']                   :: NOTE: add nym
+          [i.t.sax (de:ship:me i.t.sax)]
     :+  ~  ~
     :-  %observatory-comets
     !>  dat
@@ -100,6 +102,8 @@
   cor
 ::
   ::
+::
+++  me  ~(. me:nym [.y 128 english])
 ::
 ++  scry
   |%

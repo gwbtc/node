@@ -15,6 +15,8 @@ let headerViewedFrame = null;
 let networkPanelFrame = null;
 const dirtyNetworkTabs = new Set();
 let syncStatusRevision = 0;
+let cometRefreshFeedbackTimer = null;
+let cometNameFeedbackTimer = null;
 
 const explorerState = {
   networkPage: 'urbit',
@@ -40,9 +42,13 @@ const explorerState = {
   filterHeaderHeightsInFlight: new Set(),
   peers: null,
   cometSponsorshipGraph: null,
+  cometNyms: new Map(),
+  cometNameFormat: 'nym',
+  cometNameTogglePulse: 0,
   observatoryOur: null,
   selectedCometPatp: null,
   cometScryError: null,
+  cometRefreshState: 'idle',
   cometPeers: new Map(),
   pendingCometPeers: new Set(),
   cometPeerErrors: new Map(),
@@ -132,6 +138,14 @@ async function scryObservatoryOur() {
 }
 
 async function scryComets() {
+  if (explorerState.cometRefreshState === 'loading') return;
+  if (cometRefreshFeedbackTimer !== null) {
+    clearTimeout(cometRefreshFeedbackTimer);
+    cometRefreshFeedbackTimer = null;
+  }
+  explorerState.cometRefreshState = 'loading';
+  explorerState.cometScryError = null;
+  renderUrbitExplorer();
   try {
     const response = await fetch(`${window.location.origin}/~/scry/observatory/comets.json`);
     if (!response.ok) {
@@ -139,10 +153,18 @@ async function scryComets() {
     }
 
     explorerState.cometSponsorshipGraph = buildCometSponsorshipGraph(await response.json());
+    explorerState.cometNyms = indexCometNyms(explorerState.cometSponsorshipGraph);
     explorerState.selectedCometPatp = explorerState.cometSponsorshipGraph[0]?.patp ?? null;
     explorerState.cometScryError = null;
     scryCometPeer(explorerState.selectedCometPatp);
+    explorerState.cometRefreshState = 'success';
+    cometRefreshFeedbackTimer = setTimeout(() => {
+      cometRefreshFeedbackTimer = null;
+      explorerState.cometRefreshState = 'idle';
+      renderUrbitExplorer();
+    }, 360);
   } catch (error) {
+    explorerState.cometRefreshState = 'idle';
     explorerState.cometScryError = 'Unable to load comets from Observatory.';
     console.error('Unable to load Observatory comets:', error);
   }
@@ -3429,6 +3451,43 @@ function truncateCometPatp(patp) {
   return words.length > 1 ? `~${words[0]}_${words[words.length - 1]}` : patp;
 }
 
+function truncateCometNym(nym) {
+  const words = nym.replace(/^\.+/, '').split('.').filter(Boolean);
+  return words.length > 1 ? `..${words[0]}...${words[words.length - 1]}` : nym;
+}
+
+function indexCometNyms(roots) {
+  const nyms = new Map();
+  const pending = [...roots];
+  while (pending.length) {
+    const comet = pending.pop();
+    if (comet.nym) nyms.set(comet.patp, comet.nym);
+    pending.push(...comet.sponsees);
+  }
+  return nyms;
+}
+
+// Keep identity/cache keys as patps; only presentation follows this mode.
+// Fall back to the patp until a nym is supplied by /our or /comets.
+function formatCometName(patp, state, truncated = false) {
+  if (!patp) return '';
+  const nym = (state.observatoryOur?.patp === patp ? state.observatoryOur.nym : '') || state.cometNyms.get(patp);
+  if (state.cometNameFormat === 'nym' && nym) return truncated ? truncateCometNym(nym) : nym;
+  return truncated ? truncateCometPatp(patp) : patp;
+}
+
+function toggleCometNameFormat() {
+  explorerState.cometNameFormat = explorerState.cometNameFormat === 'nym' ? 'patp' : 'nym';
+  explorerState.cometNameTogglePulse++;
+  if (cometNameFeedbackTimer !== null) clearTimeout(cometNameFeedbackTimer);
+  renderUrbitExplorer();
+  cometNameFeedbackTimer = setTimeout(() => {
+    cometNameFeedbackTimer = null;
+    explorerState.cometNameTogglePulse = 0;
+    renderUrbitExplorer();
+  }, 360);
+}
+
 // Cache geometry by graph identity: selecting a node or receiving peer
 // data should neither recompute the layout nor move the graph beneath it.
 const cometGraphLayouts = new WeakMap();
@@ -3590,13 +3649,13 @@ function CometNetworkGraph(state) {
       key: `comet-node:${comet.patp}`,
       className: `comet-network__node${comet.sponsees.length ? ' comet-network__node--hub' : ''}${topLevel ? ' comet-network__node--top-level' : ''}${selected ? ' comet-network__node--selected' : ''}`,
       attributes: {
-        type: 'button', title: comet.patp,
-        'aria-label': `Select ${comet.patp}`, 'aria-pressed': String(selected),
+        type: 'button', title: formatCometName(comet.patp, state),
+        'aria-label': `Select ${formatCometName(comet.patp, state)}`, 'aria-pressed': String(selected),
         style: `left: ${x}px; top: ${y}px`
       }
     }, [
       element('span', { className: 'comet-network__circle', attributes: { 'aria-hidden': 'true' } }),
-      element('span', { className: 'comet-network__name', text: truncateCometPatp(comet.patp) })
+      element('span', { className: 'comet-network__name', text: formatCometName(comet.patp, state, true) })
     ]), 'click', () => selectComet(comet.patp));
   })]);
   const viewport = element('div', {
@@ -3675,13 +3734,13 @@ function CometPeerDetails(patp, state) {
   const route = peer.route;
   const lane = route?.lane;
   const routeText = route
-    ? `${route.direct ? 'Direct' : 'Indirect'} · ${lane?.ship ?? lane?.address ?? 'Unknown lane'}`
+    ? `${route.direct ? 'Direct' : 'Indirect'} · ${lane?.ship ? formatCometName(lane.ship, state) : lane?.address ?? 'Unknown lane'}`
     : 'No route';
   const bones = (items) => items?.length ? items.join(', ') : 'None';
   const rows = [
     ['life', 'Life', peer.life],
     ['rift', 'Rift', peer.rift],
-    ['sponsor', 'Sponsor', peer.sponsor],
+    ['sponsor', 'Sponsor', formatCometName(peer.sponsor, state)],
     ['fief', 'Declared endpoint', formatCometFief(peer.fief)],
     ['route', 'Route', routeText],
     ['status', 'Connection', peer.qos?.status ?? 'Unavailable'],
@@ -3749,7 +3808,7 @@ function NetworkPageTab(page, label, state) {
   });
 }
 
-function CometIdentityLogo() {
+function GWLogo() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('data-render-key', 'comet-identity-logo');
   svg.setAttribute('class', 'comet-identity-panel__logo');
@@ -3771,8 +3830,8 @@ function CometIdentityPanel(state) {
     attributes: { 'aria-label': 'Your comet' }
   }, [
     element('h2', { className: 'comet-identity-panel__name' }, [
-      CometIdentityLogo(),
-      element('span', { text: state.observatoryOur?.patp ?? our ?? '' })
+      GWLogo(),
+      element('span', { text: formatCometName(state.observatoryOur?.patp ?? our, state) })
     ]),
     element('nav', {
       key: 'network-page-tabs', className: 'network-page-tabs',
@@ -3789,6 +3848,35 @@ function CometGraphPanel(state) {
     key: 'comet-graph-panel', className: 'panel comet-graph-panel',
     attributes: { 'aria-label': 'Comet sponsorship graph' }
   }, [
+    element('div', { key: 'comet-graph:controls', className: 'comet-graph-panel__controls' }, [
+      listen(element('button', {
+        key: 'comet-graph:names', className: 'comet-graph-panel__button',
+        attributes: {
+          type: 'button', 'aria-label': 'Display mnemonym names',
+          'aria-pressed': String(state.cometNameFormat === 'nym'),
+          title: state.cometNameFormat === 'nym' ? 'Switch to patps' : 'Switch to nyms'
+        }
+      }, [element('span', {
+        key: `comet-graph:name-icon:${state.cometNameTogglePulse}`,
+        className: `comet-name-icon${state.cometNameTogglePulse ? ' comet-name-icon--pulse' : ''}`,
+        text: state.cometNameFormat === 'nym' ? '•' : '~',
+        attributes: { 'aria-hidden': 'true' }
+      })]), 'click', toggleCometNameFormat),
+      listen(element('button', {
+        key: 'comet-graph:refresh', className: 'comet-graph-panel__button',
+        attributes: {
+          type: 'button', 'aria-label': 'Refresh comet graph',
+          'aria-busy': String(state.cometRefreshState === 'loading'),
+          title: state.cometRefreshState === 'loading' ? 'Refreshing comet graph…'
+            : state.cometRefreshState === 'success' ? 'Comet graph refreshed' : 'Refresh comet graph',
+          ...(state.cometRefreshState === 'loading' ? { disabled: '' } : {})
+        }
+      }, [element('span', {
+        key: 'comet-graph:refresh-icon',
+        className: `comet-refresh-icon comet-refresh-icon--${state.cometRefreshState}`,
+        text: '↻', attributes: { 'aria-hidden': 'true' }
+      })]), 'click', scryComets)
+    ]),
     state.cometSponsorshipGraph?.length
       ? CometNetworkGraph(state)
       : element('p', {
@@ -3809,7 +3897,7 @@ function CometDetailsPanel(state) {
   }, [
     element('p', {
       key: 'comet-details:selected-name', className: 'comet-details-panel__name',
-      text: selectedPatp ?? 'No comet selected.'
+      text: selectedPatp ? formatCometName(selectedPatp, state) : 'No comet selected.'
     }),
     CometPeerDetails(selectedPatp, state)
   ]);
