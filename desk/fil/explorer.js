@@ -3987,6 +3987,38 @@ function formatCometFief(fief) {
   return `${host}:${fief.port}`;
 }
 
+const cometPeerFields = [
+  ['life', 'Life'],
+  ['rift', 'Rift'],
+  ['sponsor', 'Sponsor'],
+  ['fief', 'Declared endpoint'],
+  ['route', 'Route'],
+  ['status', 'Connection'],
+  ['last-contact', 'Last contact'],
+  ['tracking-started', 'Tracking began'],
+  ['sending', 'Sending flows'],
+  ['receiving', 'Receiving flows'],
+  ['remote-scries', 'Remote scries'],
+  ['closing', 'Closing flows'],
+  ['corked', 'Corked flows'],
+  ['halted', 'Halted flows'],
+  ['nacks', 'Negative acknowledgments'],
+  ['pass', 'Pass']
+];
+
+function CometPeerSkeleton(key) {
+  return element('div', {
+    key, className: 'comet-peer', attributes: { 'aria-busy': 'true', 'aria-label': 'Loading networking data' }
+  }, [element('dl', { className: 'comet-peer__fields' }, cometPeerFields.map(([field, label]) => {
+    const row = BlockDetailField(label, '', `${key}:${field}`);
+    row.querySelector('dd').append(element('span', {
+      className: `skeleton comet-peer__skeleton${field === 'pass' ? ' comet-peer__skeleton--pass' : ''}`,
+      attributes: { 'aria-hidden': 'true' }
+    }));
+    return row;
+  }))]);
+}
+
 function CometPeerDetails(patp, state) {
   if (!patp) return null;
   const key = `comet-peer:${patp}`;
@@ -3994,7 +4026,7 @@ function CometPeerDetails(patp, state) {
     key: `${key}:status`, className: 'comet-peer__status', text,
     attributes: { role: 'status' }
   });
-  if (state.pendingCometPeers.has(patp)) return status('Loading networking data…');
+  if (state.pendingCometPeers.has(patp)) return CometPeerSkeleton(key);
   if (state.cometPeerErrors.has(patp)) {
     return element('div', { key: `${key}:error` }, [
       status(state.cometPeerErrors.get(patp)),
@@ -4006,7 +4038,7 @@ function CometPeerDetails(patp, state) {
       })
     ]);
   }
-  if (!state.cometPeers.has(patp)) return status('Loading networking data…');
+  if (!state.cometPeers.has(patp)) return CometPeerSkeleton(key);
   const peer = state.cometPeers.get(patp);
   if (!peer) return status('No known Ames peer data for this comet.');
 
@@ -4016,36 +4048,31 @@ function CometPeerDetails(patp, state) {
     ? `${route.direct ? 'Direct' : 'Indirect'} · ${lane?.ship ? formatCometName(lane.ship, state) : lane?.address ?? 'Unknown lane'}`
     : 'No route';
   const bones = (items) => items?.length ? items.join(', ') : 'None';
-  const rows = [
-    ['life', 'Life', peer.life],
-    ['rift', 'Rift', peer.rift],
-    ['sponsor', 'Sponsor', formatCometName(peer.sponsor, state)],
-    ['fief', 'Declared endpoint', formatCometFief(peer.fief)],
-    ['route', 'Route', routeText],
-    ['status', 'Connection', peer.qos?.status ?? 'Unavailable'],
-    ['last-contact', 'Last contact', formatPeerTimestamp(peer.qos?.['last-contact'])],
-    ['tracking-started', 'Tracking began', formatPeerTimestamp(peer.qos?.['tracking-started'])],
-    ['sending', 'Sending flows', peer.flows?.sending ?? 0],
-    ['receiving', 'Receiving flows', peer.flows?.receiving ?? 0],
-    ['remote-scries', 'Remote scries', peer.flows?.['remote-scries'] ?? 0],
-    ['closing', 'Closing flows', bones(peer.flows?.closing)],
-    ['corked', 'Corked flows', bones(peer.flows?.corked)],
-    ['halted', 'Halted flows', bones(peer.flows?.halted)],
-    ['nacks', 'Negative acknowledgments', peer.flows?.nacks ?? 0]
-  ];
-  const fields = (entries) => entries.map(([field, label, value]) =>
-    PeerDetailField(key, field, label, value ?? 'Unavailable')
+  const topLevelSponsor = peer.sponsor === patp ||
+    state.cometSponsorshipGraph?.some((comet) => comet.patp === patp);
+  const values = {
+    'life': peer.life,
+    'rift': peer.rift,
+    'sponsor': topLevelSponsor ? '~' : formatCometName(peer.sponsor, state),
+    'fief': formatCometFief(peer.fief),
+    'route': routeText,
+    'status': peer.qos?.status ?? 'Unavailable',
+    'last-contact': formatPeerTimestamp(peer.qos?.['last-contact']),
+    'tracking-started': formatPeerTimestamp(peer.qos?.['tracking-started']),
+    'sending': peer.flows?.sending ?? 0,
+    'receiving': peer.flows?.receiving ?? 0,
+    'remote-scries': peer.flows?.['remote-scries'] ?? 0,
+    'closing': bones(peer.flows?.closing),
+    'corked': bones(peer.flows?.corked),
+    'halted': bones(peer.flows?.halted),
+    'nacks': peer.flows?.nacks ?? 0,
+    'pass': peer.pass
+  };
+  const fields = cometPeerFields.map(([field, label]) =>
+    BlockDetailField(label, values[field] ?? 'Unavailable', `${key}:${field}`)
   );
   return element('div', { key, className: 'comet-peer' }, [
-    element('dl', { className: 'comet-peer__fields' }, fields(rows)),
-    element('details', { key: `${key}:identity`, className: 'comet-peer__identity' }, [
-      element('summary', { text: 'Public identity material' }),
-      element('dl', { className: 'comet-peer__fields' }, fields([
-        ['pass', 'Pass', peer.pass],
-        ['cry', 'Encryption key', peer['public-keys']?.cry],
-        ['sgn', 'Signing key', peer['public-keys']?.sgn]
-      ]))
-    ])
+    element('dl', { className: 'comet-peer__fields' }, fields)
   ]);
 }
 

@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@200&display=swap');
+
 :root {
   --explorer-bg: #080a0e;
   --explorer-surface: #0e1117;
@@ -132,8 +134,9 @@ dd {
   gap: 10px;
   flex: 1 1 200px;
   min-width: 0;
+  font-family: "Roboto Condensed", "Arial Narrow", sans-serif;
   font-size: 1.15rem;
-  font-weight: 300;
+  font-weight: 200;
   overflow-wrap: anywhere;
 }
 
@@ -230,6 +233,10 @@ dd {
   background: var(--explorer-surface);
   color: var(--explorer-text);
   font: 0.8rem var(--explorer-mono);
+}
+
+.comet-search__input::-webkit-search-cancel-button {
+  cursor: pointer;
 }
 
 .comet-search__input:focus,
@@ -394,34 +401,36 @@ dd {
 }
 
 .comet-peer__fields {
-  display: grid;
-  gap: 10px;
   margin-top: 20px;
-  font-size: 0.8rem;
 }
 
-.comet-peer__fields dd {
-  overflow-wrap: anywhere;
+.comet-peer__fields .block-detail-field {
+  grid-template-columns: minmax(130px, 0.25fr) minmax(0, 0.75fr);
+}
+
+.comet-peer__skeleton {
+  display: inline-block;
+  width: min(100%, 18ch);
+  height: 0.8em;
+}
+
+.comet-peer__skeleton--pass {
+  width: 100%;
+  height: 5.4em;
+  vertical-align: top;
+}
+
+@media (max-width: 640px) {
+  .comet-peer__fields .block-detail-field {
+    grid-template-columns: minmax(105px, 0.4fr) minmax(0, 1fr);
+    gap: 12px;
+  }
 }
 
 .comet-peer__status {
   margin-top: 20px;
   color: var(--explorer-secondary);
   font-size: 0.85rem;
-}
-
-.comet-peer__identity {
-  margin-top: 20px;
-  font-size: 0.8rem;
-}
-
-.comet-peer__identity summary {
-  color: var(--explorer-secondary);
-  cursor: pointer;
-}
-
-.comet-peer__identity dd {
-  font-family: var(--explorer-mono);
 }
 
 .comet-peer__retry {
@@ -1870,6 +1879,12 @@ dd {
   .explorer {
     width: min(100% - 20px, 1200px);
     padding-top: 12px;
+  }
+
+  .comet-network {
+    height: 416px;
+    max-height: 52vh;
+    min-height: 256px;
   }
 
   .panel__header,
