@@ -19,6 +19,7 @@ let cometRefreshFeedbackTimer = null;
 let cometNameFeedbackTimer = null;
 let cometPan = null;
 let cometPanClickUntil = 0;
+let cometZoomAnimations = [];
 
 const explorerState = {
   networkPage: 'urbit',
@@ -48,6 +49,10 @@ const explorerState = {
   cometNameFormat: 'nym',
   cometNameTogglePulse: 0,
   cometGraphZoom: 'full',
+  cometSearchOpen: false,
+  cometSearchQuery: '',
+  cometSearchActiveIndex: 0,
+  cometSearchError: null,
   observatoryOur: null,
   selectedCometPatp: null,
   cometScryError: null,
@@ -3443,8 +3448,9 @@ function ConfigPanel(state) {
   }, [form]);
 }
 
-function selectComet(patp) {
+function selectComet(patp, { center = false } = {}) {
   const zoomIn = explorerState.cometGraphZoom === 'overview';
+  const transitionFrame = zoomIn || center ? captureCometZoomFrame() : null;
   explorerState.selectedCometPatp = patp;
   if (zoomIn) {
     stopCometPan();
@@ -3452,7 +3458,7 @@ function selectComet(patp) {
   }
   scryCometPeer(patp);
   renderUrbitExplorer();
-  if (zoomIn) {
+  if (zoomIn || center) {
     const viewport = document.querySelector('.comet-network');
     const selected = viewport?.querySelector('.comet-network__node--selected');
     if (selected) {
@@ -3460,6 +3466,9 @@ function selectComet(patp) {
       viewport.scrollTop = selected.offsetTop - viewport.clientHeight / 2;
     }
   }
+  // Animate search centering with the same frame transition as zooming, so
+  // moving to a peer and opening its full view happen in one smooth motion.
+  if (zoomIn || center) animateCometZoom(transitionFrame);
 }
 
 function truncateCometPatp(patp) {
@@ -3599,8 +3608,73 @@ function CometPanButton(direction, symbol, dx, dy, disabled) {
   return button;
 }
 
+function captureCometZoomFrame() {
+  const viewport = document.querySelector('.comet-network');
+  const svg = viewport?.querySelector('.comet-network__lines');
+  if (!svg || typeof svg.animate !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+  const transform = getComputedStyle(svg).transform;
+  const matrix = new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
+  const nodes = new Map();
+  for (const node of viewport.querySelectorAll('.comet-network__node')) {
+    const circle = node.querySelector('.comet-network__circle').getBoundingClientRect();
+    nodes.set(node.getAttribute('data-render-key'), {
+      x: (circle.left + circle.right) / 2, y: (circle.top + circle.bottom) / 2,
+      width: circle.width, height: circle.height,
+      named: Boolean(node.querySelector('.comet-network__name'))
+    });
+  }
+  return {
+    nodes, scale: explorerState.cometGraphZoom === 'overview' ? cometOverviewScale : 1,
+    matrix, left: viewport.scrollLeft, top: viewport.scrollTop, bounds: viewport.getBoundingClientRect()
+  };
+}
+
+function animateCometZoom(before) {
+  for (const animation of cometZoomAnimations) animation.cancel();
+  cometZoomAnimations = [];
+  const viewport = document.querySelector('.comet-network');
+  const svg = viewport?.querySelector('.comet-network__lines');
+  if (!before || !svg || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const options = { duration: 220, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' };
+  const animations = [];
+  const scale = explorerState.cometGraphZoom === 'overview' ? cometOverviewScale : 1;
+  const ratio = before.scale / scale;
+  const bounds = viewport.getBoundingClientRect();
+  // Invert the new layout and scroll position back to the previous view.
+  // Include an interrupted animation's matrix so rapid toggles stay smooth.
+  const x = before.matrix.a * cometGraphOuterMargin * (1 - ratio) + before.matrix.e +
+    viewport.scrollLeft - before.left + before.bounds.left - bounds.left;
+  const y = before.matrix.d * cometGraphOuterMargin * (1 - ratio) + before.matrix.f +
+    viewport.scrollTop - before.top + before.bounds.top - bounds.top;
+  animations.push(svg.animate([
+    { transform: `translate(${x}px, ${y}px) scale(${before.matrix.a * ratio}, ${before.matrix.d * ratio})` },
+    { transform: 'translate(0px, 0px) scale(1, 1)' }
+  ], options));
+  for (const node of viewport.querySelectorAll('.comet-network__node')) {
+    const old = before.nodes.get(node.getAttribute('data-render-key'));
+    if (!old) continue;
+    const circle = node.querySelector('.comet-network__circle');
+    const rect = circle.getBoundingClientRect();
+    animations.push(node.animate([
+      { translate: `${old.x - (rect.left + rect.right) / 2}px ${old.y - (rect.top + rect.bottom) / 2}px` },
+      { translate: '0px 0px' }
+    ], options));
+    animations.push(circle.animate([
+      { width: `${old.width}px`, height: `${old.height}px` },
+      { width: `${rect.width}px`, height: `${rect.height}px` }
+    ], options));
+    const label = node.querySelector('.comet-network__name');
+    if (label && !old.named) animations.push(label.animate([{ opacity: 0 }, { opacity: 1 }], options));
+  }
+  cometZoomAnimations = animations;
+  Promise.all(animations.map((animation) => animation.finished.catch(() => {}))).then(() => {
+    if (cometZoomAnimations === animations) cometZoomAnimations = [];
+  });
+}
+
 function toggleCometGraphZoom() {
   stopCometPan();
+  const zoomFrame = captureCometZoomFrame();
   const viewport = document.querySelector('.comet-network');
   const oldScale = explorerState.cometGraphZoom === 'overview' ? cometOverviewScale : 1;
   const center = viewport ? {
@@ -3615,6 +3689,7 @@ function toggleCometGraphZoom() {
     updated.scrollLeft = cometGraphOuterMargin + (center.x - cometGraphOuterMargin) * scale - updated.clientWidth / 2;
     updated.scrollTop = cometGraphOuterMargin + (center.y - cometGraphOuterMargin) * scale - updated.clientHeight / 2;
   }
+  animateCometZoom(zoomFrame);
 }
 
 // Project the existing layout instead of repacking: every relative node
@@ -4048,11 +4123,244 @@ function CometIdentityPanel(state) {
   ]);
 }
 
+function cometSearchNames(comet, format) {
+  return (format === 'patp' ? [comet.patp, truncateCometPatp(comet.patp)]
+    : [comet.nym, comet.nym ? truncateCometNym(comet.nym) : ''])
+    .filter(Boolean).map((name) => name.toLowerCase().replace(/^[~.]+/, ''));
+}
+
+function cometNymWordRank(nym, words) {
+  const nameWords = nym.toLowerCase().split('.').filter(Boolean);
+  // Each entered word must remain a prefix of a word in this nym.
+  if (!words.every((word) => nameWords.some((name) => name.startsWith(word)))) return Infinity;
+  const sequenceAt = (sequence, start) => sequence.every((word, index) => nameWords[start + index]?.startsWith(word));
+  // Prefer the whole query as a consecutive sequence anywhere in the nym.
+  if (nameWords.some((_, index) => sequenceAt(words, index))) return 0;
+  // Then prefer a prefix and suffix, with the unentered middle omitted.
+  if (words.length <= nameWords.length) {
+    for (let split = 1; split < words.length; split++) {
+      if (sequenceAt(words.slice(0, split), 0) &&
+          sequenceAt(words.slice(split), nameWords.length - (words.length - split))) return 1;
+    }
+  }
+  return 2;
+}
+
+function cometSearchMatches(query, state) {
+  const needle = query.trim().toLowerCase().replace(/^[~.]+/, '');
+  if (!/[a-z0-9]/i.test(needle)) return [];
+  const wordQuery = /\s/.test(query.trim()) && !/[~.]/.test(query)
+    ? needle.split(/\s+/) : null;
+  const known = new Map();
+  const add = (patp, nym = '') => {
+    if (patp) known.set(patp, { patp, nym: nym || state.cometNyms.get(patp) || '' });
+  };
+  const pending = [...(state.cometSponsorshipGraph ?? [])];
+  while (pending.length) {
+    const comet = pending.pop();
+    add(comet.patp, comet.nym);
+    pending.push(...comet.sponsees);
+  }
+  for (const [patp, nym] of state.cometNyms) add(patp, nym);
+  for (const [patp, peer] of state.cometPeers) {
+    if (!peer) continue;
+    add(patp);
+    add(peer.sponsor);
+    add(peer.route?.lane?.ship);
+  }
+  if (state.observatoryOur) add(state.observatoryOur.patp, state.observatoryOur.nym);
+  const rank = (comet, format) => {
+    if (wordQuery) return format === 'nym'
+      ? cometNymWordRank(comet.nym, wordQuery) : Infinity;
+    const names = cometSearchNames(comet, format);
+    return names.includes(needle) ? 0 : names.some((name) => name.startsWith(needle)) ? 1
+      : names.some((name) => name.includes(needle)) ? 2 : Infinity;
+  };
+  const preferred = query.trim().startsWith('~') ? 'patp'
+    : query.trim().startsWith('.') ? 'nym' : state.cometNameFormat;
+  return [...known.values()]
+    .map((comet) => {
+      const patpRank = rank(comet, 'patp');
+      const nymRank = rank(comet, 'nym');
+      const format = patpRank < nymRank ? 'patp' : nymRank < patpRank ? 'nym' : preferred;
+      return { ...comet, searchName: comet[format], searchRank: Math.min(patpRank, nymRank) };
+    })
+    .filter((comet) => Number.isFinite(comet.searchRank))
+    .sort((a, b) => a.searchRank - b.searchRank || a.patp.localeCompare(b.patp));
+}
+
+function CometSearchName(name, query) {
+  const needle = query.trim().toLowerCase().replace(/^[~.]+/, '');
+  const lower = name.toLowerCase();
+  const highlighted = new Set();
+  const wordQuery = /\s/.test(query.trim()) && !/[~.]/.test(query);
+  if (wordQuery) {
+    const words = needle.split(/\s+/);
+    for (const match of lower.matchAll(/[^.]+/g)) {
+      for (const word of words) {
+        if (match[0].startsWith(word)) {
+          for (let i = 0; i < word.length; i++) highlighted.add(match.index + i);
+        }
+      }
+    }
+  } else if (needle) {
+    // Map abbreviated search forms back onto the full name in the dropdown.
+    const offset = name.match(/^[~.]+/)?.[0].length ?? 0;
+    const variants = [Array.from({ length: name.length - offset }, (_, i) => offset + i)];
+    const words = [...lower.matchAll(/[^~.\-]+/g)];
+    if (words.length > 1) {
+      const first = words[0], last = words[words.length - 1];
+      variants.push([
+        ...Array.from({ length: first[0].length }, (_, i) => first.index + i),
+        ...Array(name.startsWith('~') ? 1 : 3).fill(null),
+        ...Array.from({ length: last[0].length }, (_, i) => last.index + i)
+      ]);
+    }
+    for (const indices of variants) {
+      const text = indices.map((i) => i === null ? (name.startsWith('~') ? '_' : '.') : lower[i]).join('');
+      for (let start = text.indexOf(needle); start !== -1; start = text.indexOf(needle, start + 1)) {
+        for (const i of indices.slice(start, start + needle.length)) {
+          if (i !== null) highlighted.add(i);
+        }
+      }
+    }
+  }
+  const parts = [];
+  for (let start = 0; start < name.length;) {
+    const matched = highlighted.has(start);
+    let end = start + 1;
+    while (end < name.length && highlighted.has(end) === matched) end++;
+    parts.push(element('span', {
+      text: name.slice(start, end), className: matched ? 'comet-search__match' : ''
+    }));
+    start = end;
+  }
+  return element('span', {}, parts);
+}
+
+function renderCometSearch() {
+  if (explorerState.networkPage !== 'urbit') return;
+  const form = document.querySelector('[data-render-key="comet-search"]');
+  if (form) reconcileNode(form, CometSearch(explorerState));
+  else renderUrbitExplorer();
+}
+
+addEventListener('keydown', (event) => {
+  if (explorerState.networkPage !== 'urbit' || event.key !== '/' ||
+      event.defaultPrevented || event.isComposing || event.repeat ||
+      event.ctrlKey || event.metaKey || event.altKey ||
+      event.target?.isContentEditable || event.target?.closest?.('input, textarea, select')) return;
+  event.preventDefault();
+  if (!explorerState.cometSearchOpen) toggleCometSearch();
+  else document.querySelector('.comet-search__input')?.focus({ preventScroll: true });
+});
+
+function toggleCometSearch() {
+  explorerState.cometSearchOpen = !explorerState.cometSearchOpen;
+  explorerState.cometSearchError = null;
+  renderCometSearch();
+  document.querySelector(explorerState.cometSearchOpen ? '.comet-search__input' : '.comet-search__toggle')
+    ?.focus({ preventScroll: true });
+}
+
+function chooseCometSearchResult(patp) {
+  explorerState.cometSearchOpen = false;
+  explorerState.cometSearchQuery = '';
+  explorerState.cometSearchError = null;
+  explorerState.cometSearchActiveIndex = 0;
+  selectComet(patp, { center: true });
+  document.querySelector('.comet-search__toggle')?.focus({ preventScroll: true });
+}
+
+function submitCometSearch(event) {
+  event.preventDefault();
+  const matches = cometSearchMatches(explorerState.cometSearchQuery, explorerState).slice(0, 8);
+  const match = matches[Math.min(explorerState.cometSearchActiveIndex, matches.length - 1)];
+  if (match) chooseCometSearchResult(match.patp);
+  else {
+    explorerState.cometSearchError = 'No matching peer found.';
+    renderCometSearch();
+  }
+}
+
+function CometSearch(state) {
+  const matches = state.cometSearchOpen && !state.cometSearchError
+    ? cometSearchMatches(state.cometSearchQuery, state).slice(0, 8) : [];
+  const active = Math.min(state.cometSearchActiveIndex, matches.length - 1);
+  const input = element('input', {
+    key: 'comet-search:input', className: 'comet-search__input',
+    attributes: {
+      id: 'comet-search-input', type: 'search', placeholder: 'Search for a peer',
+      value: state.cometSearchQuery, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false',
+      role: 'combobox', 'aria-label': 'Search for a peer', 'aria-autocomplete': 'list',
+      'aria-controls': 'comet-search-suggestions', 'aria-expanded': String(matches.length > 0),
+      'aria-invalid': String(Boolean(state.cometSearchError)),
+      ...(matches[active] ? { 'aria-activedescendant': `comet-search-option-${active}` } : {}),
+      ...(state.cometSearchError ? { 'aria-describedby': 'comet-search-error' } : {}),
+      ...(!state.cometSearchOpen ? { disabled: '' } : {})
+    }
+  });
+  listen(input, 'input', (event) => {
+    explorerState.cometSearchQuery = event.currentTarget.value;
+    explorerState.cometSearchActiveIndex = 0;
+    explorerState.cometSearchError = null;
+    renderCometSearch();
+  });
+  listen(input, 'keydown', (event) => {
+    if (event.isComposing) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      toggleCometSearch();
+    } else if (matches.length && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault();
+      explorerState.cometSearchActiveIndex = (active + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+      renderCometSearch();
+      document.getElementById(`comet-search-option-${explorerState.cometSearchActiveIndex}`)
+        ?.scrollIntoView({ block: 'nearest' });
+    }
+  });
+  return listen(element('form', {
+    key: 'comet-search', className: `comet-search${state.cometSearchOpen ? ' comet-search--open' : ''}`,
+    attributes: { role: 'search', 'aria-label': 'Comet search' }
+  }, [
+    listen(element('button', {
+      key: 'comet-search:toggle', className: 'comet-graph-panel__button comet-search__toggle', text: '🔍︎',
+      attributes: {
+        type: 'button', 'aria-label': 'Toggle peer search', 'aria-controls': 'comet-search-input',
+        'aria-expanded': String(state.cometSearchOpen)
+      }
+    }), 'click', toggleCometSearch),
+    element('div', {
+      key: 'comet-search:field', className: 'comet-search__field',
+      attributes: { 'aria-hidden': String(!state.cometSearchOpen) }
+    }, [input]),
+    matches.length ? element('ul', {
+      key: 'comet-search:suggestions', className: 'comet-search__suggestions',
+      attributes: { id: 'comet-search-suggestions', role: 'listbox', 'aria-label': 'Matching peers' }
+    }, matches.map((comet, index) => element('li', {
+      key: `comet-search:result:${comet.patp}`, attributes: { role: 'presentation' }
+    }, [listen(element('button', {
+      className: 'comet-search__option',
+      attributes: {
+        id: `comet-search-option-${index}`, type: 'button', role: 'option', tabindex: '-1',
+        'aria-selected': String(index === active)
+      }
+    }, [
+      CometSearchName(comet.searchName, state.cometSearchQuery)
+    ]), 'click', () => chooseCometSearchResult(comet.patp))]))) : null,
+    state.cometSearchOpen && state.cometSearchError ? element('p', {
+      key: 'comet-search:error', className: 'comet-search__error', text: state.cometSearchError,
+      attributes: { id: 'comet-search-error', role: 'alert' }
+    }) : null
+  ]), 'submit', submitCometSearch);
+}
+
 function CometGraphPanel(state) {
   return element('section', {
     key: 'comet-graph-panel', className: 'panel comet-graph-panel',
     attributes: { 'aria-label': 'Comet sponsorship graph' }
   }, [
+    CometSearch(state),
     element('div', { key: 'comet-graph:controls', className: 'comet-graph-panel__controls' }, [
       listen(element('button', {
         key: 'comet-graph:names', className: 'comet-graph-panel__button',

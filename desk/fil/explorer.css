@@ -132,8 +132,8 @@ dd {
   gap: 10px;
   flex: 1 1 200px;
   min-width: 0;
-  font-size: 0.95rem;
-  font-weight: 500;
+  font-size: 1.15rem;
+  font-weight: 300;
   overflow-wrap: anywhere;
 }
 
@@ -187,6 +187,110 @@ dd {
 .comet-graph-panel {
   position: relative;
   min-width: 0;
+}
+
+.comet-search {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  max-width: calc(100% - 112px);
+  margin: 0;
+}
+
+.comet-search__toggle {
+  flex: none;
+}
+
+.comet-search__field {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition: width 220ms ease, opacity 180ms ease, visibility 0s linear 220ms;
+}
+
+.comet-search--open .comet-search__field {
+  width: 300px;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.comet-search__input {
+  display: block;
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--explorer-border);
+  outline: none;
+  background: var(--explorer-surface);
+  color: var(--explorer-text);
+  font: 0.8rem var(--explorer-mono);
+}
+
+.comet-search__input:focus,
+.comet-search__input[aria-invalid="true"] {
+  border-color: var(--explorer-accent);
+}
+
+.comet-search__suggestions,
+.comet-search__error {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  width: 100%;
+  min-width: 200px;
+  max-width: calc(100vw - 56px);
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--explorer-border);
+  background: var(--explorer-surface);
+  box-shadow: 0 8px 24px #0006;
+}
+
+.comet-search__suggestions {
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.comet-search__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--explorer-text);
+  font: 0.8rem/1.5 var(--explorer-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.comet-search__option[aria-selected="true"],
+.comet-search__option:hover {
+  background: var(--explorer-selected);
+}
+
+.comet-search__match {
+  color: #70c5a7;
+  background: rgba(112, 197, 167, 0.18);
+}
+
+.comet-search__error {
+  padding: 12px;
+  color: #d87580;
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comet-search__field { transition: none; }
 }
 
 .comet-graph-panel__controls {
@@ -361,12 +465,14 @@ dd {
   top: 0;
   left: 0;
   pointer-events: none;
+  transform-origin: 0 0;
 }
 
 .comet-network__edge {
   fill: none;
   stroke: var(--explorer-border);
   stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .comet-network__edge--selected {
