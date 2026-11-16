@@ -198,6 +198,32 @@ dd {
   gap: 8px;
 }
 
+.comet-graph-panel__zoom {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 1;
+  display: grid;
+  grid-template-areas: ". up ." "left zoom right" ". down .";
+  grid-template-columns: repeat(3, 36px);
+  gap: 4px;
+}
+
+.comet-graph-panel__zoom-button { grid-area: zoom; }
+.comet-graph-pan--up { grid-area: up; }
+.comet-graph-pan--down { grid-area: down; }
+.comet-graph-pan--left { grid-area: left; }
+.comet-graph-pan--right { grid-area: right; }
+
+.comet-graph-pan {
+  touch-action: none;
+  user-select: none;
+}
+
+.comet-graph-pan:active {
+  color: #70c5a7;
+}
+
 .comet-graph-panel__button {
   display: grid;
   place-items: center;
@@ -310,7 +336,7 @@ dd {
   overflow: auto;
   scrollbar-width: none;
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y pinch-zoom;
+  touch-action: manipulation;
   cursor: grab;
   background-image: radial-gradient(var(--explorer-border) 1px, transparent 1px);
   background-size: 24px 24px;
@@ -326,6 +352,7 @@ dd {
 
 .comet-network__plane {
   position: relative;
+  isolation: isolate;
   user-select: none;
 }
 
@@ -408,6 +435,34 @@ dd {
 
 .comet-network__node:hover .comet-network__circle {
   box-shadow: 0 0 0 5px #a3bad422;
+}
+
+.comet-network--overview .comet-network__node {
+  --comet-circle-size: 8px;
+  width: calc(var(--comet-circle-size) + 16px);
+  height: calc(var(--comet-circle-size) + 16px);
+  transform: translate(-50%, -50%);
+}
+
+.comet-network--overview .comet-network__node--hub {
+  --comet-circle-size: 12px;
+}
+
+.comet-network--overview .comet-network__node--top-level {
+  --comet-circle-size: 46px;
+  z-index: 1;
+}
+
+.comet-network--overview .comet-network__circle {
+  top: 50%;
+}
+
+.comet-network--overview .comet-network__name {
+  top: calc(50% + var(--comet-circle-size) / 2 + 11px);
+}
+
+.comet-network--overview .comet-network__edge {
+  stroke-width: 1;
 }
 
 .block-search-form {

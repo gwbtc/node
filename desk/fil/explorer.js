@@ -17,6 +17,8 @@ const dirtyNetworkTabs = new Set();
 let syncStatusRevision = 0;
 let cometRefreshFeedbackTimer = null;
 let cometNameFeedbackTimer = null;
+let cometPan = null;
+let cometPanClickUntil = 0;
 
 const explorerState = {
   networkPage: 'urbit',
@@ -45,6 +47,7 @@ const explorerState = {
   cometNyms: new Map(),
   cometNameFormat: 'nym',
   cometNameTogglePulse: 0,
+  cometGraphZoom: 'full',
   observatoryOur: null,
   selectedCometPatp: null,
   cometScryError: null,
@@ -3441,9 +3444,22 @@ function ConfigPanel(state) {
 }
 
 function selectComet(patp) {
+  const zoomIn = explorerState.cometGraphZoom === 'overview';
   explorerState.selectedCometPatp = patp;
+  if (zoomIn) {
+    stopCometPan();
+    explorerState.cometGraphZoom = 'full';
+  }
   scryCometPeer(patp);
   renderUrbitExplorer();
+  if (zoomIn) {
+    const viewport = document.querySelector('.comet-network');
+    const selected = viewport?.querySelector('.comet-network__node--selected');
+    if (selected) {
+      viewport.scrollLeft = selected.offsetLeft - viewport.clientWidth / 2;
+      viewport.scrollTop = selected.offsetTop - viewport.clientHeight / 2;
+    }
+  }
 }
 
 function truncateCometPatp(patp) {
@@ -3491,7 +3507,138 @@ function toggleCometNameFormat() {
 // Cache geometry by graph identity: selecting a node or receiving peer
 // data should neither recompute the layout nor move the graph beneath it.
 const cometGraphLayouts = new WeakMap();
+const cometGraphOverviewLayouts = new WeakMap();
 const cometGraphDrags = new WeakMap();
+const cometGraphTaps = new WeakMap();
+const cometGraphOuterMargin = 128;
+const cometOverviewScale = 0.42;
+
+function stopCometPan() {
+  const pan = cometPan;
+  cometPan = null;
+  if (!pan) return;
+  if (pan.frame !== null) cancelAnimationFrame(pan.frame);
+  cometPanClickUntil = performance.now() + 180;
+  if (pan.pointerId !== null && pan.owner.hasPointerCapture(pan.pointerId)) {
+    pan.owner.releasePointerCapture(pan.pointerId);
+  }
+}
+
+function startCometPan(dx, dy, owner, pointerId = null) {
+  stopCometPan();
+  const viewport = document.querySelector('.comet-network');
+  if (!viewport || explorerState.networkPage !== 'urbit') return;
+  const pan = { dx, dy, owner, pointerId, frame: null, last: performance.now() };
+  cometPan = pan;
+  const step = (now) => {
+    if (cometPan !== pan) return;
+    const graph = document.querySelector('.comet-network');
+    if (!graph || document.hidden || explorerState.networkPage !== 'urbit') {
+      stopCometPan();
+      return;
+    }
+    const distance = Math.min(40, Math.max(0, now - pan.last)) * 0.42;
+    pan.last = now;
+    graph.scrollLeft += dx * distance;
+    graph.scrollTop += dy * distance;
+    pan.frame = requestAnimationFrame(step);
+  };
+  pan.frame = requestAnimationFrame(step);
+}
+
+addEventListener('blur', stopCometPan);
+addEventListener('pagehide', stopCometPan);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopCometPan();
+});
+
+function CometPanButton(direction, symbol, dx, dy, disabled) {
+  const button = element('button', {
+    key: `comet-graph:pan:${direction}`,
+    className: `comet-graph-panel__button comet-graph-pan comet-graph-pan--${direction}`,
+    text: symbol,
+    attributes: {
+      type: 'button', 'aria-label': `Pan graph ${direction}`, title: `Pan ${direction}`,
+      ...(disabled ? { disabled: '' } : {})
+    }
+  });
+  listen(button, 'pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    startCometPan(dx, dy, event.currentTarget, event.pointerId);
+    if (cometPan) event.currentTarget.setPointerCapture(event.pointerId);
+  });
+  const stop = (event) => {
+    if (cometPan?.owner === event.currentTarget) stopCometPan();
+  };
+  listen(button, 'pointerup', stop);
+  listen(button, 'pointercancel', stop);
+  listen(button, 'lostpointercapture', stop);
+  listen(button, 'blur', stop);
+  listen(button, 'contextmenu', (event) => event.preventDefault());
+  listen(button, 'keydown', (event) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!event.repeat) startCometPan(dx, dy, event.currentTarget);
+  });
+  listen(button, 'keyup', (event) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    stop(event);
+  });
+  // Assistive-technology activation may produce a click without a press.
+  listen(button, 'click', (event) => {
+    if (event.detail !== 0 || performance.now() < cometPanClickUntil || cometPan) return;
+    startCometPan(dx, dy, event.currentTarget);
+    const pan = cometPan;
+    setTimeout(() => {
+      if (cometPan === pan) stopCometPan();
+    }, 120);
+  });
+  return button;
+}
+
+function toggleCometGraphZoom() {
+  stopCometPan();
+  const viewport = document.querySelector('.comet-network');
+  const oldScale = explorerState.cometGraphZoom === 'overview' ? cometOverviewScale : 1;
+  const center = viewport ? {
+    x: cometGraphOuterMargin + (viewport.scrollLeft + viewport.clientWidth / 2 - cometGraphOuterMargin) / oldScale,
+    y: cometGraphOuterMargin + (viewport.scrollTop + viewport.clientHeight / 2 - cometGraphOuterMargin) / oldScale
+  } : null;
+  explorerState.cometGraphZoom = explorerState.cometGraphZoom === 'full' ? 'overview' : 'full';
+  renderUrbitExplorer();
+  const updated = document.querySelector('.comet-network');
+  if (center && updated) {
+    const scale = explorerState.cometGraphZoom === 'overview' ? cometOverviewScale : 1;
+    updated.scrollLeft = cometGraphOuterMargin + (center.x - cometGraphOuterMargin) * scale - updated.clientWidth / 2;
+    updated.scrollTop = cometGraphOuterMargin + (center.y - cometGraphOuterMargin) * scale - updated.clientHeight / 2;
+  }
+}
+
+// Project the existing layout instead of repacking: every relative node
+// position stays the same, with only distances compressed in overview.
+function cometGraphViewLayout(roots, zoom) {
+  const full = layoutCometGraph(roots);
+  if (zoom !== 'overview') return full;
+  if (cometGraphOverviewLayouts.has(full)) return cometGraphOverviewLayouts.get(full);
+  const project = (value) => cometGraphOuterMargin + (value - cometGraphOuterMargin) * cometOverviewScale;
+  const nodes = full.nodes.map((node) => ({ ...node, x: project(node.x), y: project(node.y) }));
+  const byPatp = new Map(nodes.map((node) => [node.comet.patp, node]));
+  const edges = full.edges.map((edge) => {
+    const source = byPatp.get(edge.source.comet.patp);
+    const target = byPatp.get(edge.target.comet.patp);
+    return { source, target, path: cometConnectionPath(source, target, cometOverviewScale) };
+  });
+  const overview = {
+    nodes, edges,
+    width: Math.max(800, (full.width - cometGraphOuterMargin * 2) * cometOverviewScale + cometGraphOuterMargin * 2),
+    height: Math.max(480, (full.height - cometGraphOuterMargin * 2) * cometOverviewScale + cometGraphOuterMargin * 2)
+  };
+  cometGraphOverviewLayouts.set(full, overview);
+  return overview;
+}
 
 // Stable noise gives clusters and curves an organic shape without moving
 // them on every selection, refresh, or peer-data response.
@@ -3535,12 +3682,12 @@ function cometClusterPoints(count, seed, reserveSponsor) {
   return points;
 }
 
-function cometConnectionPath(source, target) {
+function cometConnectionPath(source, target, scale = 1) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
   const distance = Math.hypot(dx, dy) || 1;
   const key = `${source.comet.patp}:${target.comet.patp}`;
-  const bend = Math.min(70, distance * 0.3);
+  const bend = Math.min(70 * scale, distance * 0.3);
   const first = (cometLayoutNoise(`${key}:first`) - 0.5) * bend * 2;
   const second = (cometLayoutNoise(`${key}:second`) - 0.5) * bend * 2;
   const fraction = 0.2 + cometLayoutNoise(`${key}:fraction`) * 0.2;
@@ -3598,7 +3745,7 @@ function layoutCometGraph(roots) {
   // the parent-child edge bridges plots instead of spanning a leaf cloud.
   const plots = [];
   const columns = Math.max(1, Math.ceil(Math.sqrt(clusters.length)));
-  const outerMargin = 128;
+  const outerMargin = cometGraphOuterMargin;
   let x = outerMargin, y = outerMargin, rowHeight = 0, width = 0;
   clusters.forEach((cluster, index) => {
     if (index && index % columns === 0) {
@@ -3626,7 +3773,8 @@ function layoutCometGraph(roots) {
 }
 
 function CometNetworkGraph(state) {
-  const layout = layoutCometGraph(state.cometSponsorshipGraph);
+  const overview = state.cometGraphZoom === 'overview';
+  const layout = cometGraphViewLayout(state.cometSponsorshipGraph, state.cometGraphZoom);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('data-render-key', 'comet-network:lines');
   svg.setAttribute('class', 'comet-network__lines');
@@ -3655,12 +3803,12 @@ function CometNetworkGraph(state) {
       }
     }, [
       element('span', { className: 'comet-network__circle', attributes: { 'aria-hidden': 'true' } }),
-      element('span', { className: 'comet-network__name', text: formatCometName(comet.patp, state, true) })
+      (!overview || topLevel) && element('span', { className: 'comet-network__name', text: formatCometName(comet.patp, state, true) })
     ]), 'click', () => selectComet(comet.patp));
   })]);
   const viewport = element('div', {
-    key: 'comet-network', className: 'comet-network',
-    attributes: { tabindex: '0', role: 'region', 'aria-label': 'Comet network graph. Scroll or drag to explore.' }
+    key: 'comet-network', className: `comet-network${overview ? ' comet-network--overview' : ''}`,
+    attributes: { tabindex: '0', role: 'region', 'aria-label': 'Comet network graph. Scroll or drag to explore. Double-click or double-tap to toggle zoom.' }
   }, [plane]);
   listen(viewport, 'pointerdown', (event) => {
     if (event.pointerType === 'touch' || event.button !== 0) return;
@@ -3683,16 +3831,72 @@ function CometNetworkGraph(state) {
   });
   const endDrag = (event) => {
     const drag = cometGraphDrags.get(event.currentTarget);
-    if (!drag) return;
+    if (!drag || drag.id !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (drag.moved) drag.suppressClickUntil = performance.now() + 400;
     drag.id = null;
   };
   listen(viewport, 'pointerup', endDrag);
   listen(viewport, 'pointercancel', endDrag);
+  listen(viewport, 'dblclick', (event) => {
+    const now = performance.now();
+    if (cometGraphDrags.get(event.currentTarget)?.suppressClickUntil > now ||
+        cometGraphTaps.get(event.currentTarget)?.suppressDblClickUntil > now) return;
+    event.preventDefault();
+    toggleCometGraphZoom();
+  });
+  listen(viewport, 'touchstart', (event) => {
+    const taps = cometGraphTaps.get(event.currentTarget) ?? {};
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      taps.start = { id: touch.identifier, x: touch.clientX, y: touch.clientY, at: performance.now() };
+    } else {
+      taps.start = null;
+      taps.last = null;
+    }
+    cometGraphTaps.set(event.currentTarget, taps);
+  }, { passive: true });
+  listen(viewport, 'touchmove', (event) => {
+    const taps = cometGraphTaps.get(event.currentTarget);
+    const start = taps?.start;
+    const touch = event.touches[0];
+    if (start && (event.touches.length !== 1 || touch.identifier !== start.id ||
+        Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 10)) {
+      taps.start = null;
+      taps.last = null;
+    }
+  }, { passive: true });
+  listen(viewport, 'touchcancel', (event) => {
+    cometGraphTaps.delete(event.currentTarget);
+  }, { passive: true });
+  listen(viewport, 'touchend', (event) => {
+    const taps = cometGraphTaps.get(event.currentTarget);
+    const start = taps?.start;
+    const touch = event.changedTouches[0];
+    if (!start) return;
+    taps.start = null;
+    const now = performance.now();
+    if (event.touches.length || !touch || touch.identifier !== start.id ||
+        now - start.at > 300 || Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 10) {
+      taps.last = null;
+      return;
+    }
+    if (taps.last && now - taps.last.at < 350 &&
+        Math.hypot(touch.clientX - taps.last.x, touch.clientY - taps.last.y) < 24) {
+      // Prevent a synthetic second click or native dblclick from toggling
+      // again or selecting a node moved underneath the second tap.
+      event.preventDefault();
+      taps.last = null;
+      taps.suppressDblClickUntil = now + 500;
+      toggleCometGraphZoom();
+    } else {
+      taps.last = { x: touch.clientX, y: touch.clientY, at: now };
+    }
+  }, { passive: false });
   listen(viewport, 'click', (event) => {
     const drag = cometGraphDrags.get(event.currentTarget);
-    if (drag?.suppressClickUntil > performance.now()) {
+    if (drag?.suppressClickUntil > performance.now() ||
+        cometGraphTaps.get(event.currentTarget)?.suppressDblClickUntil > performance.now()) {
       event.preventDefault();
       event.stopPropagation();
     }
@@ -3772,6 +3976,7 @@ function CometPeerDetails(patp, state) {
 
 function selectNetworkPage(page) {
   if (!['urbit', 'bitcoin'].includes(page) || page === explorerState.networkPage) return;
+  stopCometPan();
   if (explorerState.networkPage === 'urbit') {
     const graph = document.querySelector('.comet-network');
     if (graph) explorerState.cometGraphScroll = { left: graph.scrollLeft, top: graph.scrollTop };
@@ -3876,6 +4081,25 @@ function CometGraphPanel(state) {
         className: `comet-refresh-icon comet-refresh-icon--${state.cometRefreshState}`,
         text: '↻', attributes: { 'aria-hidden': 'true' }
       })]), 'click', scryComets)
+    ]),
+    element('div', {
+      key: 'comet-graph:zoom-controls', className: 'comet-graph-panel__zoom',
+      attributes: { role: 'group', 'aria-label': 'Graph navigation' }
+    }, [
+      CometPanButton('up', '▲', 0, -1, !state.cometSponsorshipGraph?.length),
+      CometPanButton('left', '◀', -1, 0, !state.cometSponsorshipGraph?.length),
+      listen(element('button', {
+        key: 'comet-graph:zoom', className: 'comet-graph-panel__button comet-graph-panel__zoom-button',
+        text: state.cometGraphZoom === 'overview' ? '+' : '−',
+        attributes: {
+          type: 'button', 'aria-label': 'Sponsor overview',
+          'aria-pressed': String(state.cometGraphZoom === 'overview'),
+          title: state.cometGraphZoom === 'overview' ? 'Show full network' : 'Show sponsor overview',
+          ...(!state.cometSponsorshipGraph?.length ? { disabled: '' } : {})
+        }
+      }), 'click', toggleCometGraphZoom),
+      CometPanButton('right', '▶', 1, 0, !state.cometSponsorshipGraph?.length),
+      CometPanButton('down', '▼', 0, 1, !state.cometSponsorshipGraph?.length)
     ]),
     state.cometSponsorshipGraph?.length
       ? CometNetworkGraph(state)
