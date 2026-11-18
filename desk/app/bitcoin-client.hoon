@@ -776,6 +776,7 @@
     ?+  +<.sin  cor
     ::
         %received
+      ?>  =(wir name.sin)
       =^  mes  buffer.erd  (~(read ne:b-ser network) octs.sin buffer.erd)
       =?  last-heard.erd  .?(mes)  [~ now.bowl]
       =.  cor  (update-peer erp erd)
@@ -792,6 +793,7 @@
     ::
         %connected
       ~?  verb.config  [%tcp-connected erp]
+      ?>  =(wir name.sin)
       %-  emil
       :-  (set-peer-handshake-timeout-timer erp)
       :_  ~
@@ -802,19 +804,19 @@
     ::
         %closed
       ~?  verb.config  [%tcp-closed erp p.sin]
+      ?>  =(wir name.sin)
       ?-  -.p.sin
       ::
-          %tls    (disconnect-peer ~ erp)
           %peer   (disconnect-peer ~ erp)
           %close  (disconnect-peer ~ erp)
           %local  (disconnect-peer ~ erp)
       ::
           %connect
         ?-  p.p.sin
-            %unresolved  (disconnect-peer ~ erp)
-            %invalid     (disconnect-peer ~ erp)
-            %refused     (disconnect-peer ['tcp error: refused' ~ ~d3] erp)
-            %timeout     (disconnect-peer ['tcp error: timeout' ~ ~d3] erp)
+            %taken    (disconnect-peer ~ erp)
+            %invalid  (disconnect-peer ~ erp)
+            %refused  (disconnect-peer ['tcp error: refused' ~ ~d3] erp)
+            %timeout  (disconnect-peer ['tcp error: timeout' ~ ~d3] erp)
         ==
       ::
       ==
@@ -2617,26 +2619,29 @@
   ::
   ++  open
     ^-  card
+    =/  wir  wire
     =/  ady
       ?+  net-id.erp  !!
           %ipv4  [%if `@if``@`address.erp port.erp]
           %ipv6  [%is `@is``@`address.erp port.erp]
       ==
-    :*  %pass  wire  %arvo  %m
-        %connect  |  ady
+    :*  %pass  wir  %arvo  %m
+        %connect  wir  ady
     ==
   ::
   ++  close
     ^-  card
-    :*  %pass  wire  %arvo  %m
-        %close  ~
+    =/  wir  wire
+    :*  %pass  wir  %arvo  %m
+        %close  wir
     ==
   ::
   ++  send
     |=  dat=octs
     ^-  card
-    :*  %pass  wire  %arvo  %m
-        %send  dat
+    =/  wir  wire
+    :*  %pass  wir  %arvo  %m
+        %send  wir  dat
     ==
   ::
   --
